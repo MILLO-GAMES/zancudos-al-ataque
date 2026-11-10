@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="es-CL">
+<head>
+  <meta charset="utf-8">
+  <!-- viewport-fit=cover: usamos toda la pantalla y respetamos safe-area con env() -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Asedio Neón · Millo Games</title>
+  <meta name="theme-color" content="#06041a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Asedio Neón">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="layout-compacto">
+  <div id="app">
+    <!-- ESCENARIO AR: video de cámara + canvas Three.js + HUD de mira -->
+    <main id="stage">
+      <video id="cam" playsinline muted autoplay></video>
+      <canvas id="gl"></canvas>
+      <canvas id="fx2d"></canvas>
+
+      <div id="hud-top" class="hud">
+        <div class="pill"><span class="lbl">OLEADA</span><b id="h-wave">1</b></div>
+        <div class="pill score"><b id="h-score">0</b><span id="h-combo" class="combo"></span></div>
+        <div class="pill"><span class="lbl">♥</span><b id="h-hp">100</b></div>
+      </div>
+      <div id="hud-bars" class="hud">
+        <div class="bar hp"><i id="b-hp"></i></div>
+        <div class="bar sh"><i id="b-sh"></i></div>
+      </div>
+
+      <div id="crosshair"><i></i><i></i><i></i><i></i><b></b></div>
+      <div id="dmg"></div>
+      <div id="arrows"></div>
+      <div id="toast"></div>
+
+      <!-- Mini radar flotante (solo layout compacto) -->
+      <canvas id="radar-mini" width="220" height="220"></canvas>
+
+      <!-- Controles táctiles -->
+      <div id="controls">
+        <button id="btn-shield" class="ctl" aria-label="Escudo">⬡<small>ESCUDO</small></button>
+        <button id="btn-panel" class="ctl small" aria-label="Panel">☰</button>
+        <button id="btn-reload" class="ctl small" aria-label="Recargar">⟳<small id="h-ammo-mini">30</small></button>
+        <button id="btn-fire" class="ctl fire" aria-label="Disparar">◉<small>FUEGO</small></button>
+      </div>
+    </main>
+
+    <!-- PANEL LATERAL: en Duo abierto es una columna fija; en pantalla única es un cajón desplegable -->
+    <aside id="panel">
+      <header><b>ASEDIO NEÓN</b><span>MILLO GAMES</span></header>
+      <canvas id="radar" width="400" height="400"></canvas>
+      <div class="stat"><span>Puntaje</span><b id="p-score">0</b></div>
+      <div class="stat"><span>Récord</span><b id="p-best">0</b></div>
+      <div class="stat"><span>Oleada</span><b id="p-wave">1</b></div>
+      <div class="stat"><span>Drones restantes</span><b id="p-left">0</b></div>
+      <div class="stat"><span>Munición</span><b id="p-ammo">30 / 30</b></div>
+      <div class="ammo-cells" id="p-cells"></div>
+      <div class="stat"><span>Energía</span><b id="p-hp">100</b></div>
+      <div class="bar hp"><i id="pb-hp"></i></div>
+      <div class="stat"><span>Escudo</span><b id="p-sh">100</b></div>
+      <div class="bar sh"><i id="pb-sh"></i></div>
+      <div class="stat"><span>Precisión</span><b id="p-acc">–</b></div>
+      <div class="panel-actions">
+        <button id="btn-recenter">Recentrar</button>
+        <button id="btn-pause">Pausa</button>
+        <button id="btn-layout">Layout: auto</button>
+      </div>
+      <p class="mini" id="p-mode">Modo: —</p>
+    </aside>
+  </div>
+
+  <!-- MENÚ / START -->
+  <section id="menu" class="overlay show">
+    <div class="card">
+      <img src="icons/icon-192.png" alt="" class="logo">
+      <h1>ASEDIO NEÓN</h1>
+      <p class="sub">Millo Games · AR de pieza</p>
+      <p>Drones neón invaden tu pieza. Quédate en tu sitio, gira con el teléfono, apunta con la mira y dispara. Usa el escudo para bloquear los disparos que vienen de frente.</p>
+      <button id="btn-start" class="big">▶ JUGAR EN AR</button>
+      <button id="btn-start-nocam" class="ghost">Jugar sin cámara (modo holodeck)</button>
+      <p class="perm">Te vamos a pedir <b>cámara</b> (fondo real) y <b>movimiento y orientación</b> (para apuntar girando el teléfono). Nada se graba ni se envía.</p>
+      <details id="install">
+        <summary>📲 Instalar en el iPhone</summary>
+        <ol>
+          <li>Abre este link en <b>Safari</b>.</li>
+          <li>Toca <b>Compartir</b> (cuadrado con flecha).</li>
+          <li>Elige <b>Añadir a pantalla de inicio</b> → <b>Añadir</b>.</li>
+          <li>Abre <b>Asedio Neón</b> desde el ícono: corre a pantalla completa.</li>
+        </ol>
+        <p class="mini">Es una app web instalable (PWA), no una app de App Store.</p>
+      </details>
+      <p class="mini" id="m-best"></p>
+      <p class="mini" id="m-xr"></p>
+    </div>
+  </section>
+
+  <!-- PAUSA -->
+  <section id="pause" class="overlay">
+    <div class="card">
+      <h2>PAUSA</h2>
+      <button id="btn-resume" class="big">Continuar</button>
+      <button id="btn-quit" class="ghost">Salir al menú</button>
+    </div>
+  </section>
+
+  <!-- GAME OVER -->
+  <section id="over" class="overlay">
+    <div class="card">
+      <h2>SISTEMA CAÍDO</h2>
+      <p class="big-score" id="o-score">0</p>
+      <p id="o-detail"></p>
+      <p id="o-best" class="mini"></p>
+      <button id="btn-restart" class="big">↻ Otra vez</button>
+      <button id="btn-menu" class="ghost">Menú</button>
+    </div>
+  </section>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
