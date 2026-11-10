@@ -214,3 +214,8 @@ body.layout-abierto.coop #radar { max-width: 520px; }
 body.layout-abierto.coop.segmented { --panel-w: var(--seg2-w, 46vw); }
 #album { z-index: 60; }
 #toast { white-space: normal; width: max-content; max-width: 92%; font-size: calc(var(--u)*1.8); line-height: 1.15; }
+/* botón de sonido en el HUD (el HUD no recibe toques, este sí) */
+.pill.snd { pointer-events: auto; cursor: pointer; font-size: calc(var(--u)*1.2); padding: calc(var(--u)*.3) calc(var(--u)*.6); color: inherit; }
+.vol { display: flex; align-items: center; gap: .5em; font-size: .85em; }
+.vol span { flex: 0 0 6.5em; opacity: .8; }
+.vol input { flex: 1; accent-color: var(--pink); touch-action: pan-x; }

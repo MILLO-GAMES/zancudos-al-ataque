@@ -27,6 +27,7 @@
         <div class="pill"><span class="lbl">OLEADA</span><b id="h-wave">1</b></div>
         <div class="pill score"><b id="h-score">0</b><span id="h-combo" class="combo"></span></div>
         <div class="pill"><span class="lbl">♥</span><b id="h-hp">100</b></div>
+        <button id="btn-sound" class="pill snd" aria-label="Sonido">🔊</button>
       </div>
       <div id="hud-bars" class="hud">
         <div class="bar hp"><i id="b-hp"></i></div>
@@ -82,6 +83,8 @@
         <button id="btn-detect">Posarse en objetos: sí</button>
         <button id="btn-coop">Copiloto: no</button>
       </div>
+      <label class="vol"><span>🎵 Música</span><input id="vol-music" type="range" min="0" max="100" value="60"></label>
+      <label class="vol"><span>💥 Efectos</span><input id="vol-sfx" type="range" min="0" max="100" value="90"></label>
       <p class="mini" id="p-mode">Modo: —</p>
     </aside>
   </div>
@@ -96,6 +99,7 @@
       <button id="btn-start" class="big">▶ JUGAR EN AR</button>
       <button id="btn-start-nocam" class="ghost">Jugar sin cámara (modo holodeck)</button>
       <button id="btn-album" class="ghost">📖 Álbum de láminas</button>
+      <button id="btn-sound-menu" class="ghost">🔊 Sonido: sí</button>
       <p class="perm">Te vamos a pedir <b>cámara</b> (fondo real y para reconocer muebles, todo dentro del teléfono) y <b>movimiento y orientación</b> (para apuntar girando el teléfono). Nada se graba ni se envía.</p>
       <details id="install">
         <summary>📲 Instalar en el iPhone</summary>

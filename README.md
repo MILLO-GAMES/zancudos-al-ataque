@@ -34,6 +34,11 @@ Nombre, arte y sonidos son propios de Millo Games.
 - Una sola picada a la vez al inicio, siempre avisada por sonido y color.
 - 150 de energía, +25 entre oleadas, hitbox amplia y cono de spray que ayuda a apuntar.
 
+## Música y sonido
+- **Música propia generada por código** (secuenciador WebAudio en `js/audio.js`): surf/caricatura de los 60 con bajo boogie marcado, guitarra con eco, órgano y batería. Tema tranquilo en el menú; en el juego el tempo sube con cada oleada (132 → 168 bpm) y cuando un zancudo viene a picar entra un arpegio nervioso con "theremin". Jingle de oleada superada y "wah wah waaah" de fin.
+- **Botón 🔊** arriba a la derecha (y en el menú) para silenciar. En el panel: volumen de **Música** y de **Efectos** por separado (se guardan en el teléfono). La música baja sola un instante cuando suena un "plop" o un "¡auch!".
+- **iPhone**: el audio se desbloquea dentro del primer toque. El juego pide `navigator.audioSession.type = 'playback'` (iOS 17+) y reproduce un audio HTML silencioso en loop, así suena **aunque el interruptor de silencio esté activado**. Si iOS lo corta (llamada, cámara, cambiar de app), se reanuda al volver o con el siguiente toque.
+
 ## Sonidos (todos sintetizados con WebAudio, sin archivos)
 Zumbido "bzzz" por zancudo con paneo izquierda/derecha y volumen según la distancia (sube de tono cuando pica), "pssst" del spray mientras lo mantienes, "plop + boing" cuando cae, tos chistosa cuando lo rocías, "¡auch!" cuando te pica, "paf" del manotazo y "chk-chk" al agitar la lata.
 
@@ -51,7 +56,7 @@ Zumbido "bzzz" por zancudo con paneo izquierda/derecha y volumen según la dista
 2. Toca **Compartir** → **Añadir a pantalla de inicio** → **Añadir**.
 3. Abre **Asedio Neón** desde el ícono y toca **JUGAR EN AR**.
 4. Acepta **Movimiento y orientación** y **Cámara**. Si los rechazaste: Ajustes → Safari → Configuración del sitio, o borra el ícono y vuelve a agregarlo.
-5. Si tenías la versión anterior instalada, ciérrala y ábrela de nuevo (el service worker nuevo, `asedio-neon-v2-zancudos`, reemplaza la caché vieja).
+5. Si tenías la versión anterior instalada, ciérrala y ábrela de nuevo (el service worker nuevo, `asedio-neon-v3-audio`, reemplaza la caché vieja).
 
 ## Pantallas: Duo cerrado vs abierto
 | Situación | Layout |

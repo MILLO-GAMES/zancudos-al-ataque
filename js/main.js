@@ -6,7 +6,7 @@
 // ==========================================================
 import * as THREE from '../vendor/three.module.min.js';
 import { initLayout, onLayoutChange, cycleForcedLayout, getLayout } from './layout.js';
-import { initAudio, sfx, createBuzz, sprayStart, sprayStop } from './audio.js';
+import { initAudio, unlockAudio, resumeAudio, sfx, createBuzz, sprayStart, sprayStop, musicCtl, setSound, setMusicVolume, setSfxVolume, getVolumes, audioState, outputLevel } from './audio.js';
 import { requestMotionPermission, startCamera, AimController, matchCameraFov } from './sensors.js';
 import { ObjectSpotter, PERCH_NAMES, PERCH_ICON } from './detector.js';
 import { drawCriadero, unlockCard, renderAlbum, albumCount, listenShake } from './extras.js';
@@ -247,7 +247,8 @@ function startWave() {
   S.spawnTimer = 0.6;
   S.diveCd = Math.max(3, 6 - S.wave * 0.3);
   toast(`OLEADA ${S.wave}`);
-  sfx.wave();
+  musicCtl.setWave(S.wave);
+  if (S.wave === 1) sfx.wave();
   if (S.wave > 1) S.hp = Math.min(CFG.maxHp, S.hp + 25);
 }
 const maxAlive = () => Math.min(7, 2 + Math.floor(S.wave * 0.7));
@@ -382,7 +383,7 @@ function radarPick(ev) {
     toast(`COPILOTO: ¡${side}!`);
   }
 }
-$('radar').addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); initAudio(); radarPick(e); });
+$('radar').addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); unlockAudio(); radarPick(e); });
 function applyCoop() {
   document.body.classList.toggle('coop', S.coop);
   $('btn-coop').textContent = `Copiloto: ${S.coop ? 'sí' : 'no'}`;
@@ -409,7 +410,7 @@ function update(dt) {
       if (S.spawnTimer <= 0 && alive < maxAlive()) { spawnEnemy(); S.toSpawn--; S.spawnTimer = Math.max(0.9, 2.4 - S.wave * 0.12); }
     } else if (enemies.length === 0) {
       S.interTimer += dt;
-      if (S.interTimer > 0.6 && S.interTimer - dt <= 0.6) { toast(`OLEADA ${S.wave} SUPERADA`); showFact(); }
+      if (S.interTimer > 0.6 && S.interTimer - dt <= 0.6) { toast(`OLEADA ${S.wave} SUPERADA`); showFact(); musicCtl.jingle('wave'); }
       if (S.interTimer > 4.2) { S.interTimer = 0; startWave(); }
     }
     // criaderos activos siguen soltando zancudos de a poco
@@ -446,6 +447,7 @@ function update(dt) {
     // picadas: de a una (o pocas) y siempre con aviso
     S.diveCd -= dt;
     const divers = enemies.filter((e) => e.state === 'warn' || e.state === 'dive').length;
+    musicCtl.setTension(Math.min(1, divers * 0.7));
     if (S.diveCd <= 0 && divers < maxDivers()) {
       const cands = enemies.filter((e) => e.state === 'wander');
       if (cands.length) {
@@ -781,6 +783,7 @@ function beginPlay() {
   aim.recenter(); aim.update(); camera.updateMatrixWorld();
   resetGame();
   S.state = 'playing';
+  musicCtl.play('game'); musicCtl.setWave(1);
   setTimeout(startWave, 400);
   requestWakeLock();
   if (S.mode === 'ar' && S.detectOn) { spotter.load().then(() => scheduleDetect()); }
@@ -788,7 +791,7 @@ function beginPlay() {
 function gameOver() {
   S.state = 'over'; S.firing = false; S.shielding = false; document.body.classList.remove('shielding');
   sprayStop(); for (const e of enemies) e.buzz?.set(0.05, 0, 1);
-  sfx.over();
+  musicCtl.jingle('over'); setTimeout(() => { if (S.state !== 'playing') musicCtl.play('menu'); }, 3200);
   const newBest = S.score > S.best;
   if (newBest) { S.best = S.score; localStorage.setItem('an-best', S.best); }
   $('o-score').textContent = S.score.toLocaleString('es-CL');
@@ -809,10 +812,11 @@ function pause(on) {
 }
 
 async function startAR(withCamera) {
-  initAudio();
+  unlockAudio();
   const motionP = requestMotionPermission(); // iOS: debe pedirse dentro del toque
   let camOK = false;
   if (withCamera) camOK = await startCamera(video);
+  resumeAudio(); // iOS puede dejar el audio 'interrupted' al abrir la cámara
   const motionOK = await motionP;
   S.mode = camOK ? 'ar' : 'holo';
   document.body.classList.toggle('cam-on', camOK);
@@ -833,7 +837,7 @@ async function checkXR() {
   }
 }
 async function startXR() {
-  initAudio();
+  unlockAudio();
   try {
     const session = await navigator.xr.requestSession('immersive-ar', { optionalFeatures: ['dom-overlay', 'local-floor'], domOverlay: { root: $('app') } });
     renderer.xr.enabled = true;
@@ -851,7 +855,7 @@ function hold(btn, onDown, onUp) {
   const up = () => { btn.classList.remove('active'); onUp && onUp(); };
   ['pointerup', 'pointercancel', 'lostpointercapture'].forEach((ev) => btn.addEventListener(ev, up));
 }
-hold($('btn-fire'), () => { initAudio(); S.firing = S.state === 'playing'; }, () => (S.firing = false));
+hold($('btn-fire'), () => { unlockAudio(); S.firing = S.state === 'playing'; }, () => (S.firing = false));
 hold($('btn-shield'), () => (S.shielding = S.state === 'playing'), () => (S.shielding = false));
 hold($('btn-reload'), () => shakeCan());
 hold($('btn-panel'), () => document.body.classList.toggle('panel-open'));
@@ -895,7 +899,7 @@ setInterval(() => { if (aim.has) return; const k = 4; if (keys.has('ArrowLeft'))
 
 $('btn-start').addEventListener('click', () => startAR(true));
 $('btn-start-nocam').addEventListener('click', () => startAR(false));
-$('btn-restart').addEventListener('click', () => { initAudio(); beginPlay(); });
+$('btn-restart').addEventListener('click', () => { unlockAudio(); beginPlay(); });
 $('btn-menu').addEventListener('click', () => { show('over', false); show('menu', true); resetGame(); S.state = 'menu'; updateMenuBest(); });
 $('btn-resume').addEventListener('click', () => pause(false));
 $('btn-quit').addEventListener('click', () => { show('pause', false); resetGame(); S.state = 'menu'; show('menu', true); updateMenuBest(); });
@@ -915,7 +919,20 @@ applyCoop();
 const openAlbum = () => { renderAlbum($('album-grid'), CRIADERO_URL); $('album-count').textContent = albumCount(); show('album', true); };
 $('btn-album').addEventListener('click', openAlbum); $('btn-album2').addEventListener('click', openAlbum);
 $('btn-album-close').addEventListener('click', () => show('album', false));
-document.addEventListener('visibilitychange', () => { if (document.hidden) pause(true); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) pause(true); else resumeAudio(); });
+// Audio: en iOS hay que desbloquear y reanudar dentro de un gesto. Cualquier toque sirve.
+const firstGesture = () => { unlockAudio(); if (S.state === 'menu') musicCtl.play('menu'); };
+for (const ev of ['pointerdown', 'touchend', 'click', 'keydown']) document.addEventListener(ev, firstGesture, { capture: true, passive: true });
+addEventListener('pageshow', resumeAudio); addEventListener('focus', resumeAudio);
+// Botón 🔊 del HUD y del menú + volúmenes del panel
+const vols = getVolumes();
+const paintSnd = () => { const t = getVolumes().on ? '🔊' : '🔇'; $('btn-sound').textContent = t; $('btn-sound-menu').textContent = `${t} Sonido: ${getVolumes().on ? 'sí' : 'no'}`; };
+const toggleSnd = (e) => { e.preventDefault(); e.stopPropagation(); unlockAudio(); setSound(!getVolumes().on); paintSnd(); };
+$('btn-sound').addEventListener('pointerdown', toggleSnd); $('btn-sound-menu').addEventListener('click', toggleSnd);
+$('vol-music').value = Math.round(vols.music * 100); $('vol-sfx').value = Math.round(vols.sfx * 100);
+$('vol-music').addEventListener('input', (e) => { unlockAudio(); setMusicVolume(e.target.value / 100); });
+$('vol-sfx').addEventListener('input', (e) => { unlockAudio(); setSfxVolume(e.target.value / 100); sfx.hit(); });
+paintSnd();
 
 function updateMenuBest() { $('m-best').textContent = S.best ? `Récord: ${S.best.toLocaleString('es-CL')}` : ''; }
 updateMenuBest();
@@ -931,5 +948,5 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').ca
 if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) $('install').style.display = 'none';
 
 // Para depurar / pruebas automáticas desde la consola
-window.__asedio = { gameOver, S, enemies, perches, nests, emptyNest, tapNest, radarPick, shakeCan, camera, aim, spawnEnemy, spotter, addOrUpdatePerch, runDetector, CFG,
+window.__asedio = { audioState, outputLevel, musicCtl, gameOver, S, enemies, perches, nests, emptyNest, tapNest, radarPick, shakeCan, camera, aim, spawnEnemy, spotter, addOrUpdatePerch, runDetector, CFG,
   aimAt(e) { const p = e.sprite.position; aim.dragYaw = Math.atan2(-p.x, -p.z); aim.dragPitch = Math.asin(p.y / p.length()); } };
