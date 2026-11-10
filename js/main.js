@@ -1,24 +1,30 @@
 // ==========================================================
-// Asedio Neón · Millo Games
-// Shooter AR por oleadas: quédate en el centro de tu pieza, gira, apunta y dispara.
-// Render: Three.js sobre el video de la cámara trasera. Apuntado: orientación del teléfono.
+// Asedio Neón · Millo Games — Invasión de zancudos AR
+// Quédate en tu sitio, gira el teléfono, apunta y rocíales insecticida.
+// Render: Three.js sobre el video de la cámara trasera. Apuntado: orientación del teléfono (3DoF).
+// Los zancudos se posan sobre objetos reales que detecta MediaPipe (tele, sillón, mesa…).
 // ==========================================================
 import * as THREE from '../vendor/three.module.min.js';
 import { initLayout, onLayoutChange, cycleForcedLayout, getLayout } from './layout.js';
-import { initAudio, sfx } from './audio.js';
-import { requestMotionPermission, startCamera, stopCamera, AimController, matchCameraFov } from './sensors.js';
+import { initAudio, sfx, createBuzz, sprayStart, sprayStop } from './audio.js';
+import { requestMotionPermission, startCamera, AimController, matchCameraFov } from './sensors.js';
+import { ObjectSpotter, PERCH_NAMES, PERCH_ICON } from './detector.js';
+import { drawCriadero, unlockCard, renderAlbum, albumCount, listenShake } from './extras.js';
 
 const $ = (id) => document.getElementById(id);
-const stage = $('stage'), video = $('cam'), glCanvas = $('gl');
+const stage = $('stage'), video = $('cam'), glCanvas = $('gl'), fx2d = $('fx2d');
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const DEG = Math.PI / 180;
 
-// ---------------- Configuración de juego ----------------
+// ---------------- Configuración (más fácil que la versión de drones) ----------------
 const CFG = {
-  maxHp: 100, maxShield: 100,
-  shieldDrain: 16, shieldRegen: 14, shieldCone: Math.cos(60 * Math.PI / 180), shieldBlockCost: 10,
-  magazine: 30, fireRate: 7, reloadTime: 1.1,
-  projectileHitDist: 0.45,
+  maxHp: 150, maxShield: 100,
+  shieldDrain: 14, shieldRegen: 16, shieldCone: Math.cos(70 * DEG), shieldReach: 1.8,
+  sprayMax: 30, sprayDrain: 5, sprayRegen: 0, shakeTime: 0.8, sprayTick: 0.1,
+  sprayRange: 9, sprayCone: 6 * DEG,            // el cono se ensancha con la distancia (ayuda de puntería)
+  arcYaw: 45 * DEG, arcPitch: 20 * DEG,          // arco frontal donde aparecen y vuelan
+  perchDist: 3.0,                                // distancia fija a la que se proyecta un objeto detectado
 };
 
 // ---------------- Three.js ----------------
@@ -29,24 +35,31 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(65, 1, 0.05, 200);
 camera.rotation.order = 'YXZ';
 scene.add(camera);
-scene.add(new THREE.HemisphereLight(0x88ccff, 0x442266, 1.2));
-const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(2, 5, 3); scene.add(sun);
-
 const aim = new AimController(camera, stage);
+const spotter = new ObjectSpotter();
 
-// Textura de brillo (glow) generada en canvas: reemplaza el bloom sin postproceso
-function glowTexture() {
+// Texturas
+const loader = new THREE.TextureLoader();
+const tex = (name) => { const t = loader.load(`assets/sprites/${name}.webp`); t.colorSpace = THREE.SRGBColorSpace; return t; };
+const TEX = {
+  flap: [1, 2, 3, 4].map((i) => tex(`zancudo_${i}`)),
+  dead: tex('zancudo_muerto'),
+  var2: tex('zancudo_var2'),
+  var3: tex('zancudo_var3'),
+};
+const FLAP_SEQ = [1, 2, 3, 2]; // índices 0-based de los cuadros 2-3-4-3
+function softTexture(inner, outer) {
   const c = document.createElement('canvas'); c.width = c.height = 128;
   const g = c.getContext('2d');
   const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-  grd.addColorStop(0, 'rgba(255,255,255,1)'); grd.addColorStop(0.25, 'rgba(255,255,255,.6)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
+  grd.addColorStop(0, inner); grd.addColorStop(0.55, outer); grd.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
-const GLOW = glowTexture();
-const glowMat = (color, opacity = 1) => new THREE.SpriteMaterial({ map: GLOW, color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false });
+const PUFF = softTexture('rgba(255,255,235,.95)', 'rgba(230,250,200,.45)');
+const FOG = softTexture('rgba(150,255,110,.9)', 'rgba(90,220,80,.4)');
 
-// ---------- Ambiente holodeck (solo sin cámara) + anillo holográfico de arena (siempre) ----------
+// ---------- Ambiente holodeck (solo sin cámara) ----------
 const holodeck = new THREE.Group(); scene.add(holodeck);
 {
   const grid = new THREE.GridHelper(80, 80, 0xff2bd6, 0x7a1a8a); grid.position.y = -1.5;
@@ -55,235 +68,329 @@ const holodeck = new THREE.Group(); scene.add(holodeck);
   for (let i = 0; i < 900; i++) { const v = new THREE.Vector3().randomDirection().multiplyScalar(rand(60, 90)); if (v.y < -5) v.y *= -1; p.push(v.x, v.y, v.z); }
   starsG.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
   holodeck.add(new THREE.Points(starsG, new THREE.PointsMaterial({ color: 0x99ddff, size: 0.25 })));
-  scene.fog = null;
+  // Una "tele" falsa en el holodeck para que también haya donde posarse sin cámara
+  const tv = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.75, 0.08), new THREE.MeshBasicMaterial({ color: 0x1b1b2e }));
+  const scr = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.66), new THREE.MeshBasicMaterial({ color: 0x2a6cff }));
+  scr.position.z = 0.045; tv.add(scr);
+  tv.position.set(-1.1, -0.55, -3.2); tv.lookAt(0, -0.55, 0); holodeck.add(tv);
+  holodeck.userData.tvTop = new THREE.Vector3(-1.1, -0.55 + 0.375, -3.2);
 }
-const arenaRing = new THREE.Mesh(new THREE.RingGeometry(1.15, 1.2, 64), new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.35, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
-arenaRing.rotation.x = -Math.PI / 2; arenaRing.position.y = -1.4; scene.add(arenaRing);
-
-// ---------- Geometrías compartidas ----------
-const GEO = {
-  ring: new THREE.TorusGeometry(0.32, 0.045, 10, 36),
-  core: new THREE.SphereGeometry(0.16, 20, 14),
-  fin: new THREE.BoxGeometry(0.5, 0.04, 0.12),
-  spike: new THREE.ConeGeometry(0.12, 0.45, 10),
-  shell: new THREE.IcosahedronGeometry(0.42, 1),
-  bolt: new THREE.SphereGeometry(0.11, 12, 8),
-  spark: new THREE.BufferGeometry(),
-};
 
 // ---------------- Estado ----------------
 const S = {
-  state: 'menu', mode: 'ar', // 'ar' (cámara+IMU) | 'holo' (sin cámara) | 'xr' (WebXR real)
+  state: 'menu', mode: 'ar', // 'ar' (cámara+IMU) | 'holo' (sin cámara) | 'xr'
   score: 0, best: +(localStorage.getItem('an-best') || 0),
   wave: 0, toSpawn: 0, spawnTimer: 0, interTimer: 0,
   hp: CFG.maxHp, shield: CFG.maxShield, shieldBroken: false, shieldIdle: 0,
-  ammo: CFG.magazine, reloading: 0, fireCd: 0,
-  firing: false, shielding: false,
-  combo: 0, comboTimer: 0, shots: 0, hits: 0, kills: 0,
-  time: 0,
+  spray: CFG.sprayMax, shaking: 0, sprayIdle: 0, tickCd: 0,
+  firing: false, shielding: false, wasFiring: false,
+  combo: 0, comboTimer: 0, shots: 0, hits: 0, kills: 0, perchKills: 0, avoided: 0, bites: 0, nests: 0,
+  coop: localStorage.getItem('an-coop') === 'on',
+  diveCd: 4, perchCd: 2, time: 0,
+  detectOn: localStorage.getItem('an-detect') !== 'off', detectT: 0, spotted: new Set(),
 };
-const enemies = [], bolts = [], beams = [], particles = [];
+const enemies = [], puffs = [], perches = [], nests = [];
 
-// ---------------- Enemigos ----------------
+// ---------------- Tipos de zancudo ----------------
 const TYPES = {
-  dron:      { hp: 1, score: 100, speed: 1.6, fireEvery: [2.6, 4.2], dmg: 15, color: 0x00f0ff, core: 0xff3c5a, scale: 1 },
-  veloz:     { hp: 1, score: 150, speed: 2.6, fireEvery: null,       dmg: 20, color: 0xffe14a, core: 0xff8a00, scale: 0.8 },
-  acorazado: { hp: 4, score: 300, speed: 0.9, fireEvery: [3.2, 4.5], dmg: 20, color: 0xff2bd6, core: 0xffffff, scale: 1.35, burst: 3 },
+  zancudo:    { name: 'zancudo',    hp: 2, score: 100, speed: 0.55, dive: 1.5, dmg: 10, size: 0.62, zig: 0.22, zigF: 1.3, pitch: 1.0,  tex: 'flap' },
+  explorador: { name: 'explorador', hp: 2, score: 150, speed: 0.9,  dive: 1.9, dmg: 10, size: 0.55, zig: 0.35, zigF: 2.0, pitch: 1.25, tex: 'var2' },
+  acorazado:  { name: 'acorazado',  hp: 6, score: 300, speed: 0.4,  dive: 1.2, dmg: 15, size: 0.85, zig: 0.15, zigF: 0.9, pitch: 0.72, tex: 'var3' },
 };
 
-function buildDrone(type) {
+/** Dirección dentro del arco frontal (−Z es "el frente" fijado al iniciar o recentrar). */
+function arcDir(yawMax = CFG.arcYaw, pitchMax = CFG.arcPitch) {
+  const yaw = rand(-yawMax, yawMax), pitch = rand(-pitchMax, pitchMax);
+  return new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+}
+const arcPoint = () => arcDir(Math.min(CFG.arcYaw, (30 + S.wave * 4) * DEG)).multiplyScalar(rand(3.8, 6));
+
+function spawnEnemy(forceType) {
+  const w = S.wave; let type = 'zancudo'; const r = Math.random();
+  if (w >= 2 && r < Math.min(0.3, 0.1 + w * 0.03)) type = 'explorador';
+  else if (w >= 3 && r > 1 - Math.min(0.25, 0.06 + w * 0.025)) type = 'acorazado';
+  if (forceType) type = forceType;
   const t = TYPES[type];
-  const g = new THREE.Group();
-  const ringMat = new THREE.MeshStandardMaterial({ color: t.color, emissive: t.color, emissiveIntensity: 1.4, metalness: 0.3, roughness: 0.3 });
-  const coreMat = new THREE.MeshStandardMaterial({ color: t.core, emissive: t.core, emissiveIntensity: 2 });
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1a1030, metalness: 0.8, roughness: 0.35, emissive: 0x110022 });
-  if (type === 'acorazado') {
-    const shell = new THREE.Mesh(GEO.shell, bodyMat); g.add(shell);
-    const r1 = new THREE.Mesh(GEO.ring, ringMat); r1.scale.setScalar(1.6); g.add(r1);
-    const r2 = new THREE.Mesh(GEO.ring, ringMat); r2.scale.setScalar(1.6); r2.rotation.y = Math.PI / 2; g.add(r2);
-    g.userData.spin = [r1, r2];
-  } else if (type === 'veloz') {
-    const sp = new THREE.Mesh(GEO.spike, bodyMat); sp.rotation.x = Math.PI / 2; g.add(sp);
-    const r = new THREE.Mesh(GEO.ring, ringMat); r.scale.setScalar(0.8); g.add(r);
-    g.userData.spin = [r];
-  } else {
-    const r = new THREE.Mesh(GEO.ring, ringMat); g.add(r);
-    const f1 = new THREE.Mesh(GEO.fin, bodyMat); f1.position.y = 0.0; g.add(f1);
-    const f2 = f1.clone(); f2.rotation.z = Math.PI / 2; g.add(f2);
-    g.userData.spin = [f1, f2];
-  }
-  const core = new THREE.Mesh(GEO.core, coreMat); core.position.z = 0.02; g.add(core);
-  const glow = new THREE.Sprite(glowMat(t.core, 0.85)); glow.scale.setScalar(0.9); g.add(glow);
-  g.scale.setScalar(t.scale);
-  g.userData.coreMat = coreMat; g.userData.glow = glow;
-  return g;
+  const mat = new THREE.SpriteMaterial({ map: t.tex === 'flap' ? TEX.flap[1] : TEX[t.tex], transparent: true, depthWrite: false });
+  const sprite = new THREE.Sprite(mat); sprite.scale.setScalar(t.size);
+  const home = arcPoint();
+  const full = nests.filter((n) => n.full);
+  let base;
+  if (full.length && Math.random() < 0.7) { const n = full[Math.floor(Math.random() * full.length)]; base = n.sprite.position.clone(); n.wiggle = 0.6; }
+  else { base = home.clone().setLength(14); base.y += rand(1, 3); }  // entra desde lejos, al frente
+  sprite.position.copy(base); scene.add(sprite);
+  const e = {
+    type, t, sprite, mat, hp: t.hp, radius: t.size * 0.55, state: 'enter', st: 0,
+    base, home, phase: rand(0, 10), retarget: rand(2.5, 4), flipX: 1, buzz: createBuzz(t.pitch), perch: null, perchCd: rand(1, 3),
+    hitFlash: 0, vel: new THREE.Vector3(),
+  };
+  enemies.push(e);
+  return e;
 }
 
-function spawnEnemy() {
-  const w = S.wave;
-  let type = 'dron';
-  const r = Math.random();
-  if (w >= 2 && r < Math.min(0.35, 0.12 + w * 0.03)) type = 'veloz';
-  else if (w >= 3 && r > 1 - Math.min(0.3, 0.08 + w * 0.025)) type = 'acorazado';
-  const t = TYPES[type];
-  // Aparecen sobre todo al frente; con las oleadas se abren hacia los lados y la espalda
-  const spread = Math.min(Math.PI, (70 + w * 18) * Math.PI / 180);
-  const yaw = rand(-spread, spread);
-  const dist = rand(5.5, 9);
-  const home = new THREE.Vector3(-Math.sin(yaw) * dist, rand(-0.6, 2.2), -Math.cos(yaw) * dist).add(camBase);
-  const start = home.clone().sub(camBase).setLength(22).add(camBase); start.y += rand(2, 5);
-  const mesh = buildDrone(type);
-  mesh.position.copy(start);
-  scene.add(mesh);
-  enemies.push({
-    type, t, mesh, hp: t.hp, radius: 0.42 * t.scale,
-    home, target: home.clone(), entering: true,
-    fireT: t.fireEvery ? rand(...t.fireEvery) * (type === 'dron' ? 1 : 1) : 0, charging: 0, burstLeft: 0,
-    wobble: rand(0, 10), retarget: rand(2, 4),
-  });
-  spawnPortal(home);
+function removeEnemy(e) {
+  const i = enemies.indexOf(e); if (i >= 0) enemies.splice(i, 1);
+  scene.remove(e.sprite); e.mat.dispose(); e.buzz?.stop();
+  if (e.perch && e.perch.occupant === e) e.perch.occupant = null;
 }
-const camBase = new THREE.Vector3(0, 0, 0); // centro de la arena (en WebXR se fija al iniciar)
-
-function killEnemy(e, byPlayer = true) {
-  const i = enemies.indexOf(e); if (i < 0) return;
-  enemies.splice(i, 1);
-  scene.remove(e.mesh);
-  explode(e.mesh.position, e.t.color, e.type === 'acorazado' ? 70 : 40);
-  sfx.explode();
-  if (byPlayer) {
-    S.kills++;
-    S.combo++; S.comboTimer = 2.5;
-    addScore(e.t.score * comboMult());
-  }
+function killEnemy(e) {
+  if (e.state === 'dying') return;
+  const wasPerched = e.state === 'perched';
+  if (e.state === 'warn' || e.state === 'dive') S.avoided++;
+  card(e.type); if (wasPerched) card('posado');
+  e.buzz?.stop(); e.buzz = null;
+  if (e.perch && e.perch.occupant === e) e.perch.occupant = null;
+  e.state = 'dying'; e.st = 0;
+  e.mat.map = e.t.tex === 'flap' ? TEX.dead : TEX[e.t.tex];
+  e.mat.color.setHex(e.t.tex === 'flap' ? 0xffffff : 0xb8ffb0);
+  e.vel.set(rand(-0.3, 0.3), 0.8, 0);
+  fog(e.sprite.position, 6);
+  sfx.plop(); if (Math.random() < 0.6) setTimeout(() => sfx.cough(), 120);
+  S.kills++; if (wasPerched) S.perchKills++;
+  S.combo++; S.comboTimer = 3;
+  addScore(e.t.score * comboMult() * (wasPerched ? 2 : 1));
+  if (wasPerched) floatText('¡×2 posado!');
 }
-const comboMult = () => 1 + Math.min(4, Math.floor(S.combo / 5));
+const comboMult = () => 1 + Math.min(4, Math.floor(S.combo / 4));
 function addScore(n) { S.score += Math.round(n); }
 
-// ---------------- Proyectiles enemigos ----------------
-function enemyFire(e) {
-  const from = e.mesh.position.clone();
-  const to = camera.position.clone().add(new THREE.Vector3(rand(-0.08, 0.08), rand(-0.08, 0.05), 0));
-  const speed = 3.0 + Math.min(3, S.wave * 0.18);
-  const vel = to.sub(from).normalize().multiplyScalar(speed);
-  const mesh = new THREE.Group();
-  mesh.add(new THREE.Mesh(GEO.bolt, new THREE.MeshBasicMaterial({ color: 0xffb070 })));
-  const gl = new THREE.Sprite(glowMat(0xff5a1e, 1)); gl.scale.setScalar(0.7); mesh.add(gl);
-  mesh.position.copy(from); scene.add(mesh);
-  bolts.push({ mesh, vel, dmg: e.t.dmg, radius: 0.22, life: 12 });
-  sfx.enemyShot();
+// ---------------- Nubes (spray y niebla verde) ----------------
+function puff(pos, vel, tx, size0, size1, life, opacity) {
+  const m = new THREE.SpriteMaterial({ map: tx, transparent: true, opacity, depthWrite: false });
+  const s = new THREE.Sprite(m); s.position.copy(pos); s.scale.setScalar(size0); s.material.rotation = rand(0, 6);
+  scene.add(s); puffs.push({ s, vel, size0, size1, life, max: life, opacity });
 }
-function removeBolt(b) { const i = bolts.indexOf(b); if (i >= 0) bolts.splice(i, 1); scene.remove(b.mesh); }
-
-// ---------------- Efectos ----------------
-const sparkMat = new THREE.PointsMaterial({ size: 0.09, map: GLOW, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, vertexColors: true });
-function explode(pos, color, n = 40) {
-  const geo = new THREE.BufferGeometry();
-  const p = new Float32Array(n * 3), c = new Float32Array(n * 3), v = [];
-  const col = new THREE.Color(color), white = new THREE.Color(0xffffff);
-  for (let i = 0; i < n; i++) {
-    p.set([pos.x, pos.y, pos.z], i * 3);
-    const cc = Math.random() < 0.3 ? white : col; c.set([cc.r, cc.g, cc.b], i * 3);
-    v.push(new THREE.Vector3().randomDirection().multiplyScalar(rand(1.5, 5)));
+function fog(pos, n) {
+  if (pos.distanceTo(camera.position) < 1.6) n = Math.min(n, 1); // no tapar la vista si muere encima tuyo
+  for (let i = 0; i < n; i++) puff(pos.clone().add(new THREE.Vector3(rand(-0.15, 0.15), rand(-0.1, 0.1), rand(-0.15, 0.15))),
+    new THREE.Vector3(rand(-0.4, 0.4), rand(-0.2, 0.4), rand(-0.4, 0.4)), FOG, 0.25, rand(0.8, 1.3), rand(0.9, 1.4), 0.55);
+}
+const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(), tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
+function sprayPuffs() {
+  camera.getWorldDirection(fwd);
+  right.set(1, 0, 0).applyQuaternion(camera.quaternion); up.set(0, 1, 0).applyQuaternion(camera.quaternion);
+  for (let i = 0; i < 2; i++) {
+    const p = camera.position.clone().addScaledVector(fwd, 0.45).addScaledVector(right, 0.1).addScaledVector(up, -0.12);
+    const v = fwd.clone().multiplyScalar(rand(6, 8)).addScaledVector(right, rand(-0.5, 0.2)).addScaledVector(up, rand(-0.2, 0.5));
+    puff(p, v, PUFF, 0.08, rand(1.0, 1.6), rand(0.55, 0.75), 0.32);
   }
-  geo.setAttribute('position', new THREE.BufferAttribute(p, 3));
-  geo.setAttribute('color', new THREE.BufferAttribute(c, 3));
-  const pts = new THREE.Points(geo, sparkMat.clone()); scene.add(pts);
-  const flash = new THREE.Sprite(glowMat(color, 1)); flash.position.copy(pos); flash.scale.setScalar(1.5); scene.add(flash);
-  particles.push({ obj: pts, v, life: 0.9, max: 0.9, flash });
-}
-function spawnPortal(pos) {
-  const ring = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.28, 40), new THREE.MeshBasicMaterial({ color: 0xff2bd6, transparent: true, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
-  ring.position.copy(pos); ring.lookAt(camera.position); scene.add(ring);
-  particles.push({ obj: ring, portal: true, life: 1.0, max: 1.0 });
-}
-const beamMat = new THREE.MeshBasicMaterial({ color: 0x7dffd8, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
-const beamGeo = new THREE.CylinderGeometry(0.012, 0.02, 1, 6, 1, true); beamGeo.translate(0, 0.5, 0); beamGeo.rotateX(Math.PI / 2);
-function shootBeam(from, to) {
-  const m = new THREE.Mesh(beamGeo, beamMat.clone());
-  m.position.copy(from); m.lookAt(to); m.scale.set(1, 1, from.distanceTo(to));
-  scene.add(m);
-  const fl = new THREE.Sprite(glowMat(0x7dffd8, 0.9)); fl.position.copy(from); fl.scale.setScalar(0.18); scene.add(fl);
-  beams.push({ m, fl, life: 0.09 });
-  // Corrige el "lookAt" del cilindro (eje Z) → apunta de from a to
-  m.lookAt(to);
 }
 
-// ---------------- Disparo del jugador ----------------
-const ray = new THREE.Ray(), tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
-/** Busca el objetivo más cercano a lo largo de la mira, con un poco de ayuda de apuntado. */
-function pickTarget() {
-  camera.getWorldDirection(tmp2);
-  ray.set(camera.position, tmp2);
-  let best = null, bestT = Infinity;
-  const test = (obj, pos, radius) => {
-    tmp.copy(pos).sub(ray.origin);
-    const t = tmp.dot(ray.direction); if (t < 0.3) return;
-    const perp = Math.sqrt(Math.max(0, tmp.lengthSq() - t * t));
-    const assist = radius * 1.2 + t * 0.025; // ayuda proporcional a la distancia (pantalla chica)
-    if (perp < assist && t < bestT) { bestT = t; best = obj; }
-  };
-  for (const e of enemies) if (!e.entering) test(e, e.mesh.position, e.radius);
-  for (const b of bolts) test(b, b.mesh.position, b.radius + 0.1);
-  return best ? { obj: best, t: bestT } : null;
+// ---------------- Spray del jugador ----------------
+/** ¿El zancudo está dentro del cono de spray? Devuelve la distancia o -1. Hitbox amplia + cono que se abre. */
+function inCone(e, extra = 1) {
+  tmp.copy(e.sprite.position).sub(camera.position);
+  const t = tmp.dot(fwd); if (t < 0.3 || t > CFG.sprayRange) return -1;
+  const perp = Math.sqrt(Math.max(0, tmp.lengthSq() - t * t));
+  return perp < (e.radius * 1.5 + t * Math.tan(CFG.sprayCone)) * extra ? t : -1;
 }
-const gunOffset = new THREE.Vector3(0.09, -0.12, -0.25);
-function playerShoot() {
-  if (S.reloading > 0) return;
-  if (S.ammo <= 0) { sfx.empty(); startReload(); return; }
-  S.ammo--; S.shots++; S.fireCd = 1 / CFG.fireRate;
-  sfx.shoot();
-  const from = gunOffset.clone().applyMatrix4(camera.matrixWorld);
-  const hit = pickTarget();
-  camera.getWorldDirection(tmp2);
-  const to = hit ? hit.obj.mesh.position.clone() : camera.position.clone().addScaledVector(tmp2, 40);
-  shootBeam(from, to);
-  if (hit) {
-    S.hits++;
-    flashCross('hit');
-    if (bolts.includes(hit.obj)) { explode(hit.obj.mesh.position, 0xff8a3a, 14); removeBolt(hit.obj); addScore(25); sfx.hit(); }
-    else {
-      const e = hit.obj; e.hp--;
-      if (e.hp <= 0) killEnemy(e); else { sfx.hit(); explode(e.mesh.position, 0xffffff, 10); e.mesh.userData.hitFlash = 0.12; }
-    }
-  } else { S.combo = 0; }
-  if (S.ammo <= 0) startReload();
+function sprayTick() {
+  S.shots++;
+  camera.getWorldDirection(fwd);
+  let any = false;
+  for (const e of [...enemies]) {
+    if (e.state === 'dying' || e.state === 'enter') continue;
+    if (inCone(e) < 0) continue;
+    any = true;
+    e.hp -= e.state === 'perched' ? 2 : 1; e.hitFlash = 0.12;
+    if (e.hp <= 0) killEnemy(e); else { sfx.hit(); if (Math.random() < 0.35) sfx.cough(); }
+  }
+  for (const n of nests) if (n.full && inCone(n) >= 0) { any = true; n.hp--; if (n.hp <= 0) emptyNest(n); else splash(n.sprite.position, 3); }
+  if (any) { S.hits++; flashCross('hit'); }
 }
-function startReload() {
-  if (S.reloading > 0 || S.ammo === CFG.magazine) return;
-  S.reloading = CFG.reloadTime; sfx.reload();
+function shakeCan() {
+  if (S.shaking > 0 || S.spray >= CFG.sprayMax) return;
+  S.shaking = CFG.shakeTime; sfx.shake(); stopSprayFx();
+  handEl.classList.remove('agitando'); void handEl.offsetWidth; handEl.classList.add('agitando');
 }
+
+// ---------------- Mano con insecticida (DOM, primera persona) ----------------
+const handEl = $('hand'); const handImgs = [...handEl.querySelectorAll('img')];
+const H = { frame: 1, t: 0, phase: 'idle' }; // idle | press | spray | release
+function setHand(f) {
+  if (H.frame === f) return;
+  handImgs[H.frame - 1].classList.remove('on'); handImgs[f - 1].classList.add('on'); H.frame = f;
+  const kick = f === 4 ? [-8, 6, -2.5] : f === 5 ? [-4, 9, -1.2] : f === 3 ? [0, 3, 0] : [0, 0, 0];
+  handEl.style.transform = `translate(${kick[0]}px, ${kick[1]}px) rotate(${kick[2]}deg)`;
+}
+function updateHand(dt, spraying) {
+  H.t += dt;
+  if (spraying) {
+    if (H.phase === 'idle' || H.phase === 'release') { H.phase = 'press'; H.t = 0; }
+    if (H.phase === 'press') { setHand(H.t < 0.05 ? 2 : 3); if (H.t > 0.1) { H.phase = 'spray'; H.t = 0; } }
+    else if (H.phase === 'spray') setHand(Math.floor(H.t / 0.09) % 2 ? 5 : 4);
+  } else {
+    if (H.phase === 'spray' || H.phase === 'press') { H.phase = 'release'; H.t = 0; }
+    if (H.phase === 'release') { setHand(6); if (H.t > 0.14) { H.phase = 'idle'; setHand(1); } }
+  }
+}
+function stopSprayFx() { sprayStop(); }
 
 // ---------------- Daño al jugador ----------------
-function playerHit(dmg, fromPos) {
-  // Escudo frontal: bloquea si está activo y el golpe viene de donde estás mirando
-  if (S.shielding && !S.shieldBroken && S.shield > 0) {
-    camera.getWorldDirection(tmp2);
-    tmp.copy(fromPos).sub(camera.position).normalize();
-    if (tmp.dot(tmp2) > CFG.shieldCone) {
-      S.shield = Math.max(0, S.shield - CFG.shieldBlockCost); sfx.block();
-      explode(fromPos, 0x00f0ff, 18); addScore(10);
-      if (S.shield <= 0) S.shieldBroken = true;
-      return;
-    }
-  }
+function playerHit(dmg) {
+  S.bites++;
   S.hp = Math.max(0, S.hp - dmg); S.combo = 0;
-  sfx.hurt();
-  const d = $('dmg'); d.classList.add('on'); setTimeout(() => d.classList.remove('on'), 90);
-  if (navigator.vibrate) navigator.vibrate(80);
+  sfx.ouch();
+  const d = $('dmg'); d.classList.add('on'); setTimeout(() => d.classList.remove('on'), 120);
+  if (navigator.vibrate) navigator.vibrate(60);
+  floatText('¡AUCH!');
   if (S.hp <= 0) gameOver();
 }
 
-// ---------------- Oleadas ----------------
+// ---------------- Oleadas (curva suave) ----------------
 function startWave() {
   S.wave++;
-  S.toSpawn = 4 + S.wave * 2;
-  S.spawnTimer = 0.8;
+  S.toSpawn = 3 + S.wave * 2;
+  const want = Math.min(3, 1 + Math.floor(S.wave / 2)) - nests.filter((n) => n.full).length;
+  for (let i = 0; i < want; i++) spawnNest();
+  if (S.wave === 1) setTimeout(() => toast('MISIÓN: ¡VACÍA LOS CRIADEROS!'), 1700);
+  S.spawnTimer = 0.6;
+  S.diveCd = Math.max(3, 6 - S.wave * 0.3);
   toast(`OLEADA ${S.wave}`);
   sfx.wave();
-  if (S.wave > 1) { S.hp = Math.min(CFG.maxHp, S.hp + 15); } // pequeño respiro entre oleadas
+  if (S.wave > 1) S.hp = Math.min(CFG.maxHp, S.hp + 25);
 }
-const maxAlive = () => Math.min(9, 3 + Math.floor(S.wave * 0.8));
+const maxAlive = () => Math.min(7, 2 + Math.floor(S.wave * 0.7));
+const maxDivers = () => 1 + Math.floor(S.wave / 4);
+
+// ---------------- Objetos detectados → perchas ----------------
+const ndc = new THREE.Vector3();
+/** Convierte un bounding box (px de video) a una dirección 3D usando la orientación actual (3DoF). */
+function boxTopToWorld(d) {
+  const vw = video.videoWidth, vh = video.videoHeight, ew = stage.clientWidth, eh = stage.clientHeight;
+  const sc = Math.max(ew / vw, eh / vh), ox = (vw * sc - ew) / 2, oy = (vh * sc - eh) / 2;
+  const sx = (d.x + d.w / 2) * sc - ox, sy = d.y * sc - oy, sw = d.w * sc;
+  if (sy < eh * 0.03 || sx < 0 || sx > ew || sy > eh * 0.92) return null; // el borde superior debe verse
+  ndc.set((sx / ew) * 2 - 1, -(sy / eh) * 2 + 1, 0.5).unproject(camera);
+  const dir = ndc.sub(camera.position).normalize();
+  // ancho aproximado en metros a la distancia fija (para repartir dónde se posa)
+  const ndcW = (sw / ew) * 2; const halfW = Math.tan(camera.fov * DEG / 2) * camera.aspect * CFG.perchDist * ndcW / 2;
+  return { pos: camera.position.clone().addScaledVector(dir, CFG.perchDist), halfW: clamp(halfW, 0.15, 1.2) };
+}
+function addOrUpdatePerch(label, pos, halfW, fake = false) {
+  let p = perches.find((q) => q.label === label && q.pos.angleTo(pos) < 12 * DEG);
+  if (p) { p.pos.lerp(pos, 0.4); p.halfW = p.halfW * 0.6 + halfW * 0.4; p.seen = S.time; return p; }
+  if (perches.length >= 4) { const old = perches.filter((q) => !q.occupant).sort((a, b) => a.seen - b.seen)[0]; if (!old) return null; perches.splice(perches.indexOf(old), 1); }
+  p = { label, pos: pos.clone(), halfW, seen: S.time, born: S.time, occupant: null, fake };
+  perches.push(p);
+  if (!S.spotted.has(label)) { S.spotted.add(label); sfx.spot(); toast(`¡Veo ${PERCH_NAMES[label] || label}!`); }
+  S.perchCd = Math.min(S.perchCd, 0.5);
+  return p;
+}
+function runDetector() {
+  if (!S.detectOn || S.mode !== 'ar' || spotter.status !== 'ready') return;
+  const res = spotter.detect(video); if (!res) return;
+  for (const d of res) { const w = boxTopToWorld(d); if (w) addOrUpdatePerch(d.label, w.pos, w.halfW); }
+}
+let detectTimer = 0;
+function scheduleDetect() {
+  clearTimeout(detectTimer);
+  detectTimer = setTimeout(() => { if (S.state === 'playing') runDetector(); scheduleDetect(); }, spotter.interval());
+}
+function prunePerches() {
+  camera.getWorldDirection(fwd);
+  for (const p of [...perches]) {
+    if (p.fake) continue;
+    tmp.copy(p.pos).project(camera);
+    const inView = tmp.z < 1 && Math.abs(tmp.x) < 0.9 && Math.abs(tmp.y) < 0.9;
+    const unseen = S.time - p.seen;
+    if ((inView && unseen > 3.5) || unseen > 30) {
+      if (p.occupant && p.occupant.state === 'perched') { p.occupant.state = 'wander'; p.occupant.perchCd = 3; }
+      perches.splice(perches.indexOf(p), 1);
+    }
+  }
+}
+
+// ---------------- Misión: eliminar criaderos (agua estancada) ----------------
+const NEST_KINDS = ['balde', 'neumatico', 'florero'];
+const NEST_NAMES = { balde: 'el balde', neumatico: 'el neumático', florero: 'el florero' };
+const NEST_TEX = {};
+for (const k of NEST_KINDS) for (const full of [true, false]) {
+  const t = new THREE.CanvasTexture(drawCriadero(k, full)); t.colorSpace = THREE.SRGBColorSpace; NEST_TEX[k + full] = t;
+}
+const CRIADERO_URL = drawCriadero('balde', true).toDataURL();
+function spawnNest() {
+  const kind = NEST_KINDS[Math.floor(Math.random() * NEST_KINDS.length)];
+  // abajo y al frente, "en el suelo" de la pieza, separados entre sí
+  let pos;
+  for (let k = 0; k < 8; k++) {
+    const yaw = rand(-40, 40) * DEG, pitch = rand(-22, -10) * DEG, d = rand(3.4, 4.4);
+    pos = new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(d);
+    if (nests.every((n) => n.sprite.position.angleTo(pos) > 15 * DEG)) break;
+  }
+  const mat = new THREE.SpriteMaterial({ map: NEST_TEX[kind + true], transparent: true, depthWrite: false });
+  const sprite = new THREE.Sprite(mat); sprite.scale.setScalar(0.75); sprite.position.copy(pos); scene.add(sprite);
+  nests.push({ kind, sprite, mat, radius: 0.42, hp: 3, full: true, releaseT: rand(6, 10), baseY: pos.y, wiggle: 0, fade: 2.5 });
+}
+function splash(pos, n) {
+  for (let i = 0; i < n; i++) puff(pos.clone().add(new THREE.Vector3(rand(-0.1, 0.1), 0.15, rand(-0.1, 0.1))),
+    new THREE.Vector3(rand(-0.6, 0.6), rand(0.8, 1.6), rand(-0.6, 0.6)), PUFF, 0.08, rand(0.25, 0.45), rand(0.4, 0.7), 0.6);
+}
+function emptyNest(n) {
+  if (!n.full) return;
+  n.full = false; n.mat.map = NEST_TEX[n.kind + false]; n.fade = 3;
+  splash(n.sprite.position, 10); sfx.plop(); S.nests++; addScore(250);
+  floatText('¡CRIADERO VACIADO!'); toast(`¡Vaciaste ${NEST_NAMES[n.kind]}!`); card('criadero');
+}
+/** Tocar un criadero en pantalla también lo vacía. */
+function tapNest(cx, cy) {
+  const r = stage.getBoundingClientRect();
+  for (const n of nests) {
+    if (!n.full) continue;
+    tmp.copy(n.sprite.position).project(camera); if (tmp.z > 1) continue;
+    const x = (tmp.x * 0.5 + 0.5) * r.width + r.left, y = (-tmp.y * 0.5 + 0.5) * r.height + r.top;
+    tmp2.copy(n.sprite.position).add(new THREE.Vector3(0, 0.38, 0)).project(camera);
+    const rad = Math.max(40, Math.abs((-tmp2.y * 0.5 + 0.5) * r.height + r.top - y) * 1.2);
+    if (Math.hypot(cx - x, cy - y) < rad) { emptyNest(n); return true; }
+  }
+  return false;
+}
+
+// ---------------- Álbum de láminas ----------------
+function card(id) {
+  const c = unlockCard(id); if (!c) return;
+  setTimeout(() => { sfx.spot(); toast(`¡NUEVA LÁMINA: ${c.name.toUpperCase()}!`); }, 500);
+}
+const TIPS = [
+  'Usa mosquitero en la cama, sobre todo si duermes con la ventana abierta.',
+  'Vacía una vez a la semana el agua de baldes, neumáticos, floreros y platos de maceteros.',
+  'Aplica repelente en la piel expuesta siguiendo las instrucciones del envase (en niños, que lo ponga un adulto).',
+  'Pon mallas en ventanas y puertas para que no entren.',
+  'Tapa bien estanques y tambores de agua, y cambia el agua de los bebederos de mascotas a menudo.',
+  'Usa ropa clara de manga larga al atardecer, cuando muchos zancudos salen a comer.',
+  'Si usas insecticida en spray, ventila la pieza y aléjalo de la comida, los niños y las mascotas.',
+];
+
+// ---------------- Modo copiloto (Duo abierto) ----------------
+// La otra pantalla muestra un radar grande: el copiloto toca un punto y marca al zancudo más cercano en esa dirección.
+function radarPick(ev) {
+  if (S.state !== 'playing') return;
+  const cv = $('radar'), r = cv.getBoundingClientRect();
+  const x = (ev.clientX - r.left) / r.width * 2 - 1, y = (ev.clientY - r.top) / r.height * 2 - 1;
+  camera.getWorldDirection(tmp2);
+  const ang = Math.atan2(-x, -y) + Math.atan2(tmp2.x, tmp2.z); // inverso de drawRadar
+  let best = null, bd = 1e9;
+  for (const e of enemies) {
+    if (e.state === 'dying' || e.state === 'enter') continue;
+    const p = e.sprite.position; let d = Math.abs(Math.atan2(Math.sin(Math.atan2(p.x, p.z) - ang), Math.cos(Math.atan2(p.x, p.z) - ang)));
+    if (d < bd) { bd = d; best = e; }
+  }
+  if (best && bd < 35 * DEG) {
+    best.marked = S.time + 4; sfx.warn();
+    tmp.copy(best.sprite.position).project(camera);
+    const side = tmp.z > 1 ? 'ATRÁS' : tmp.x < -0.6 ? 'IZQUIERDA' : tmp.x > 0.6 ? 'DERECHA' : tmp.y > 0.5 ? 'ARRIBA' : tmp.y < -0.5 ? 'ABAJO' : 'AL FRENTE';
+    toast(`COPILOTO: ¡${side}!`);
+  }
+}
+$('radar').addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); initAudio(); radarPick(e); });
+function applyCoop() {
+  document.body.classList.toggle('coop', S.coop);
+  $('btn-coop').textContent = `Copiloto: ${S.coop ? 'sí' : 'no'}`;
+  requestAnimationFrame(resize);
+}
+
+// Agitar el iPhone recarga el spray (botón ⟳ de respaldo)
+listenShake(() => { if (S.state === 'playing') shakeCan(); });
 
 // ---------------- Loop ----------------
 const clock = new THREE.Clock();
@@ -291,130 +398,248 @@ function update(dt) {
   S.time += dt;
   if (S.mode !== 'xr') aim.update();
   camera.updateMatrixWorld();
+  camera.getWorldDirection(fwd);
+  const playing = S.state === 'playing';
 
-  if (S.state === 'playing') {
+  if (playing) {
     // oleada
     if (S.toSpawn > 0) {
       S.spawnTimer -= dt;
-      if (S.spawnTimer <= 0 && enemies.length < maxAlive()) { spawnEnemy(); S.toSpawn--; S.spawnTimer = Math.max(0.5, 1.8 - S.wave * 0.1); }
+      const alive = enemies.filter((e) => e.state !== 'dying').length;
+      if (S.spawnTimer <= 0 && alive < maxAlive()) { spawnEnemy(); S.toSpawn--; S.spawnTimer = Math.max(0.9, 2.4 - S.wave * 0.12); }
     } else if (enemies.length === 0) {
       S.interTimer += dt;
-      if (S.interTimer > 0.6 && S.interTimer - dt <= 0.6) toast(`OLEADA ${S.wave} SUPERADA`);
-      if (S.interTimer > 2.6) { S.interTimer = 0; startWave(); }
+      if (S.interTimer > 0.6 && S.interTimer - dt <= 0.6) { toast(`OLEADA ${S.wave} SUPERADA`); showFact(); }
+      if (S.interTimer > 4.2) { S.interTimer = 0; startWave(); }
     }
-    // disparo / recarga
-    S.fireCd -= dt;
-    if (S.reloading > 0) { S.reloading -= dt; if (S.reloading <= 0) { S.reloading = 0; S.ammo = CFG.magazine; } }
-    if (S.firing && S.fireCd <= 0) playerShoot();
-    // escudo
+    // criaderos activos siguen soltando zancudos de a poco
+    for (const n of nests) {
+      if (n.wiggle > 0) n.wiggle -= dt;
+      n.sprite.position.y = n.baseY + (n.wiggle > 0 ? Math.sin(S.time * 40) * 0.02 : 0);
+      if (!n.full) { n.fade -= dt; n.mat.opacity = clamp(n.fade, 0, 1); continue; }
+      n.releaseT -= dt; if (n.releaseT <= 0) { n.releaseT = rand(9, 13); if (S.toSpawn < 12) S.toSpawn++; }
+    }
+    for (const n of [...nests]) if (!n.full && n.fade <= 0) { scene.remove(n.sprite); n.mat.dispose(); nests.splice(nests.indexOf(n), 1); }
+    // spray
+    const canSpray = S.firing && S.shaking <= 0 && S.spray > 0;
+    if (S.shaking > 0) { S.shaking -= dt; S.spray = Math.min(CFG.sprayMax, S.spray + CFG.sprayMax * dt / CFG.shakeTime); if (S.shaking <= 0) S.spray = CFG.sprayMax; }
+    if (canSpray) {
+      if (!S.wasFiring) sprayStart();
+      S.spray = Math.max(0, S.spray - CFG.sprayDrain * dt); S.sprayIdle = 0;
+      S.tickCd -= dt; if (S.tickCd <= 0) { S.tickCd = CFG.sprayTick; sprayTick(); sprayPuffs(); }
+      if (S.spray <= 0) { sfx.empty(); toast('¡AGITA EL IPHONE!'); S.hintT = S.time; }
+    } else {
+      if (S.wasFiring) sprayStop();
+      S.tickCd = 0; S.sprayIdle += dt;
+      if (S.firing && S.spray <= 0 && S.shaking <= 0 && S.time - (S.hintT || 0) > 2.5) { S.hintT = S.time; toast('¡AGITA EL IPHONE!'); sfx.empty(); }
+    }
+    S.wasFiring = canSpray;
+    updateHand(dt, canSpray);
+    // manotazo (escudo)
     const wasShield = document.body.classList.contains('shielding');
     const sh = S.shielding && !S.shieldBroken && S.shield > 0;
     if (sh) { S.shield = Math.max(0, S.shield - CFG.shieldDrain * dt); S.shieldIdle = 0; if (S.shield <= 0) S.shieldBroken = true; }
     else { S.shieldIdle += dt; if (S.shieldIdle > 0.7) S.shield = Math.min(CFG.maxShield, S.shield + CFG.shieldRegen * dt); }
     if (S.shieldBroken && S.shield >= 30) S.shieldBroken = false;
     if (sh !== wasShield) { document.body.classList.toggle('shielding', sh); if (sh) sfx.shieldOn(); }
-    // combo
     if (S.comboTimer > 0) { S.comboTimer -= dt; if (S.comboTimer <= 0) S.combo = 0; }
-  }
-
-  // enemigos
-  const playing = S.state === 'playing';
-  for (const e of [...enemies]) {
-    const m = e.mesh;
-    e.wobble += dt;
-    if (e.entering) {
-      m.position.lerp(e.home, 1 - Math.pow(0.02, dt));
-      if (m.position.distanceTo(e.home) < 0.3) e.entering = false;
-    } else if (e.type === 'veloz') {
-      // kamikaze: zigzaguea hacia ti
-      tmp.copy(camera.position).sub(m.position);
-      const d = tmp.length();
-      tmp.normalize().multiplyScalar(e.t.speed * (playing ? 1 : 0) * dt);
-      m.position.add(tmp);
-      m.position.x += Math.sin(e.wobble * 5) * 0.02; m.position.y += Math.cos(e.wobble * 4) * 0.015;
-      if (d < 0.8 && playing) { killEnemy(e, false); playerHit(e.t.dmg, m.position); continue; }
-    } else {
-      e.retarget -= dt;
-      if (e.retarget <= 0) {
-        e.retarget = rand(2, 4);
-        const off = e.home.clone().sub(camBase);
-        const yaw = Math.atan2(off.x, off.z) + rand(-0.5, 0.5);
-        const dist = clamp(off.setY(0).length() + rand(-1.2, 1.2), 4.5, 10);
-        e.target.set(Math.sin(yaw) * dist, rand(-0.6, 2.2), Math.cos(yaw) * dist).add(camBase);
-        e.home.copy(e.target);
+    // picadas: de a una (o pocas) y siempre con aviso
+    S.diveCd -= dt;
+    const divers = enemies.filter((e) => e.state === 'warn' || e.state === 'dive').length;
+    if (S.diveCd <= 0 && divers < maxDivers()) {
+      const cands = enemies.filter((e) => e.state === 'wander');
+      if (cands.length) {
+        // prefiere uno que estés viendo, para que la picada sea justa
+        cands.sort((a, b) => tmp.copy(b.sprite.position).normalize().dot(fwd) - tmp2.copy(a.sprite.position).normalize().dot(fwd));
+        const e = Math.random() < 0.75 ? cands[0] : cands[Math.floor(Math.random() * cands.length)];
+        e.state = 'warn'; e.st = 0; sfx.warn();
       }
-      m.position.lerp(e.target, 1 - Math.pow(0.5, dt * e.t.speed * 0.6));
-      m.position.y += Math.sin(e.wobble * 2) * 0.004;
-      // disparo con aviso: el núcleo brilla blanco antes de disparar
-      if (playing && e.t.fireEvery) {
-        e.fireT -= dt;
-        if (e.fireT < 0.6 && !e.charging) { e.charging = 1; sfx.charge(); }
-        if (e.fireT <= 0) {
-          enemyFire(e); e.charging = 0;
-          if (e.t.burst && e.burstLeft === 0) e.burstLeft = e.t.burst - 1;
-          if (e.burstLeft > 0) { e.burstLeft--; e.fireT = 0.25; e.charging = 1; }
-          else e.fireT = rand(...e.t.fireEvery) * Math.max(0.55, 1 - S.wave * 0.04);
-        }
+      S.diveCd = rand(4.5, 7.5) * Math.max(0.55, 1 - S.wave * 0.05);
+    }
+    // posarse: cada tanto un zancudo libre va a un objeto detectado
+    S.perchCd -= dt;
+    if (S.perchCd <= 0) {
+      S.perchCd = rand(1.5, 3);
+      const free = perches.filter((p) => !p.occupant);
+      const cands = enemies.filter((e) => e.state === 'wander' && e.perchCd <= 0);
+      if (free.length && cands.length && Math.random() < 0.8) {
+        const p = free[Math.floor(Math.random() * free.length)], e = cands[Math.floor(Math.random() * cands.length)];
+        p.occupant = e; e.perch = p; e.state = 'toPerch'; e.st = 0; e.perchX = rand(-0.6, 0.6) * p.halfW;
       }
     }
-    m.lookAt(camera.position);
-    for (const s of m.userData.spin || []) s.rotation.z += dt * 3;
-    const cm = m.userData.coreMat;
-    if (m.userData.hitFlash > 0) { m.userData.hitFlash -= dt; cm.emissive.setHex(0xffffff); }
-    else if (e.charging) cm.emissive.setHex(Math.floor(S.time * 14) % 2 ? 0xffffff : e.t.core);
-    else cm.emissive.setHex(e.t.core);
-    m.userData.glow.material.opacity = e.charging ? 1 : 0.7 + Math.sin(e.wobble * 6) * 0.15;
-  }
+    prunePerches();
+  } else if (S.wasFiring) { sprayStop(); S.wasFiring = false; updateHand(dt, false); }
 
-  // proyectiles
-  for (const b of [...bolts]) {
-    b.mesh.position.addScaledVector(b.vel, playing ? dt : 0);
-    b.life -= dt;
-    b.mesh.rotation.z += dt * 10;
-    if (playing && b.mesh.position.distanceTo(camera.position) < CFG.projectileHitDist) {
-      const p = b.mesh.position.clone().sub(b.vel.clone().normalize().multiplyScalar(0.5));
-      removeBolt(b); playerHit(b.dmg, p); continue;
-    }
-    if (b.life <= 0) removeBolt(b);
-  }
-  // rayos y partículas
-  for (const bm of [...beams]) {
-    bm.life -= dt; bm.m.material.opacity = Math.max(0, bm.life / 0.09); bm.fl.material.opacity = bm.m.material.opacity;
-    if (bm.life <= 0) { scene.remove(bm.m); scene.remove(bm.fl); beams.splice(beams.indexOf(bm), 1); }
-  }
-  for (const p of [...particles]) {
+  // zancudos
+  for (const e of [...enemies]) updateEnemy(e, dt, playing);
+
+  // nubes
+  for (const p of [...puffs]) {
     p.life -= dt; const k = Math.max(0, p.life / p.max);
-    if (p.portal) { p.obj.scale.setScalar(1 + (1 - k) * 4); p.obj.material.opacity = k; }
-    else {
-      const pos = p.obj.geometry.attributes.position;
-      for (let i = 0; i < p.v.length; i++) { pos.array[i * 3] += p.v[i].x * dt; pos.array[i * 3 + 1] += p.v[i].y * dt; pos.array[i * 3 + 2] += p.v[i].z * dt; p.v[i].multiplyScalar(0.96); }
-      pos.needsUpdate = true; p.obj.material.opacity = k;
-      if (p.flash) { p.flash.material.opacity = k * k; p.flash.scale.setScalar(1.5 + (1 - k) * 2); }
-    }
-    if (p.life <= 0) { scene.remove(p.obj); if (p.flash) scene.remove(p.flash); p.obj.geometry !== GEO.spark && p.obj.geometry.dispose?.(); particles.splice(particles.indexOf(p), 1); }
+    p.s.position.addScaledVector(p.vel, dt); p.vel.multiplyScalar(Math.pow(0.12, dt));
+    p.s.scale.setScalar(p.size1 + (p.size0 - p.size1) * k);
+    p.s.material.opacity = p.opacity * Math.min(1, k * 2.2);
+    if (p.life <= 0) { scene.remove(p.s); p.s.material.dispose(); puffs.splice(puffs.indexOf(p), 1); }
   }
-  arenaRing.material.opacity = 0.22 + Math.sin(S.time * 2) * 0.08;
 
-  // mira sobre objetivo
-  const tgt = enemies.length ? pickTarget() : null;
-  $('crosshair').classList.toggle('on-target', !!tgt);
+  const tgt = enemies.some((e) => e.state !== 'dying' && e.state !== 'enter' && inCone(e) >= 0);
+  $('crosshair').classList.toggle('on-target', tgt);
 }
+
+const camRight = new THREE.Vector3();
+function updateEnemy(e, dt, playing) {
+  const s = e.sprite, t = e.t;
+  e.phase += dt; e.st += dt;
+  const sp = playing ? 1 : 0.25;
+  // aleteo 2-3-4-3 (cuadros con alas); el acorazado/explorador "vibran" con escala
+  if (e.state !== 'dying') {
+    if (t.tex === 'flap') {
+      const rate = e.state === 'perched' ? 0 : e.state === 'dive' ? 26 : 18;
+      e.mat.map = e.state === 'perched' ? TEX.flap[3] : TEX.flap[FLAP_SEQ[Math.floor(e.phase * rate) % 4]];
+    }
+    const wob = e.state === 'perched' ? 0 : Math.sin(e.phase * 55) * 0.03;
+    s.scale.set(t.size * (1 + wob) * e.flipX, t.size * (1 - wob), 1);
+  }
+  // giro hacia donde vuela (sprite en espejo)
+  const prev = tmp2.copy(s.position);
+  camRight.set(-e.base.z, 0, e.base.x).normalize(); // perpendicular horizontal al rayo
+  switch (e.state) {
+    case 'enter': {
+      e.base.lerp(e.home, 1 - Math.pow(0.15, dt * sp));
+      s.position.copy(e.base);
+      if (e.base.distanceTo(e.home) < 0.4) e.state = 'wander';
+      break;
+    }
+    case 'wander': {
+      e.retarget -= dt; e.perchCd -= dt;
+      if (e.retarget <= 0) { e.retarget = rand(2.5, 4.5); e.home.copy(arcPoint()); }
+      tmp.copy(e.home).sub(e.base); const d = tmp.length();
+      if (d > 0.01) e.base.addScaledVector(tmp.normalize(), Math.min(d, t.speed * dt * sp));
+      s.position.copy(e.base).addScaledVector(camRight, Math.sin(e.phase * t.zigF * 2) * t.zig).add(tmp.set(0, Math.sin(e.phase * 2.3) * 0.1, 0));
+      break;
+    }
+    case 'warn': {
+      // aviso: tiembla, se pone rojizo y el zumbido sube
+      s.position.copy(e.base).add(tmp.set(rand(-0.04, 0.04), rand(-0.04, 0.04), 0));
+      if (e.st > 1.4) { e.state = 'dive'; e.st = 0; }
+      break;
+    }
+    case 'dive': {
+      tmp.copy(camera.position).sub(e.base); const d = tmp.length();
+      e.base.addScaledVector(tmp.normalize(), t.dive * dt * sp);
+      s.position.copy(e.base).addScaledVector(camRight, Math.sin(e.phase * 5) * 0.12 * Math.min(1, d / 2));
+      // manotazo: si estás bloqueando y viene de frente, lo espantas
+      if (playing && document.body.classList.contains('shielding') && d < CFG.shieldReach && tmp.copy(e.base).normalize().dot(fwd) > CFG.shieldCone) {
+        S.shield = Math.max(0, S.shield - 15); sfx.swat(); sfx.cough(); addScore(25); floatText('¡PAF!'); S.avoided++; card('manotazo');
+        e.state = 'retreat'; e.home.copy(arcPoint()); e.st = 0; break;
+      }
+      if (playing && d < 0.55) { playerHit(t.dmg); e.state = 'retreat'; e.home.copy(arcPoint()); e.st = 0; }
+      break;
+    }
+    case 'retreat': {
+      tmp.copy(e.home).sub(e.base); const d = tmp.length();
+      e.base.addScaledVector(tmp.normalize(), Math.min(d, 2.2 * dt));
+      s.position.copy(e.base);
+      if (d < 0.3) { e.state = 'wander'; e.perchCd = 2; }
+      break;
+    }
+    case 'toPerch': {
+      if (!e.perch || !perches.includes(e.perch)) { e.state = 'wander'; e.perch = null; break; }
+      const target = tmp.copy(e.perch.pos).addScaledVector(camRightOf(e.perch.pos), e.perchX).add(new THREE.Vector3(0, t.size * 0.36, 0));
+      const d = target.distanceTo(e.base);
+      e.base.lerp(target, Math.min(1, (1.4 * dt) / Math.max(d, 0.01)));
+      s.position.copy(e.base).add(new THREE.Vector3(0, Math.sin(e.phase * 3) * 0.05 * Math.min(1, d), 0));
+      if (d < 0.06) { e.state = 'perched'; e.st = 0; e.perchTime = rand(5, 8); sfx.perch(); }
+      break;
+    }
+    case 'perched': {
+      // quieto, "frotando las patas": pequeño vaivén lateral
+      if (!e.perch || !perches.includes(e.perch)) { e.state = 'wander'; e.perch = null; break; }
+      const target = tmp.copy(e.perch.pos).addScaledVector(camRightOf(e.perch.pos), e.perchX).add(new THREE.Vector3(0, t.size * 0.36, 0));
+      e.base.lerp(target, 0.3);
+      s.position.copy(e.base); s.position.x += Math.sin(e.phase * 14) * 0.006; s.material.rotation = Math.sin(e.phase * 7) * 0.04;
+      if (e.st > e.perchTime) { e.state = 'wander'; e.perch.occupant = null; e.perch = null; e.perchCd = rand(4, 7); s.material.rotation = 0; }
+      break;
+    }
+    case 'dying': {
+      e.vel.y -= 4.5 * dt; s.position.addScaledVector(e.vel, dt);
+      s.material.rotation += dt * 4 * (e.flipX || 1);
+      if (t.tex !== 'flap') s.scale.y = -Math.abs(s.scale.y); // patas arriba
+      e.mat.opacity = clamp(1.6 - e.st, 0, 1);
+      if (Math.random() < dt * 10) fog(s.position, 1);
+      if (e.st > 1.6) removeEnemy(e);
+      return;
+    }
+  }
+  if (e.state !== 'perched') s.material.rotation = 0;
+  // mirar hacia donde vuela (espejo horizontal según movimiento en pantalla)
+  tmp.copy(s.position).sub(prev);
+  const lateral = tmp.dot(right.set(1, 0, 0).applyQuaternion(camera.quaternion));
+  if (Math.abs(lateral) > 0.004) e.flipX = lateral > 0 ? -1 : 1;
+  // color: aviso rojizo / destello al recibir spray
+  if (e.hitFlash > 0) { e.hitFlash -= dt; e.mat.color.setRGB(0.75, 1, 0.55); }
+  else if (e.state === 'warn') e.mat.color.setRGB(1, Math.floor(e.st * 10) % 2 ? 0.55 : 1, Math.floor(e.st * 10) % 2 ? 0.55 : 1);
+  else e.mat.color.setRGB(1, 1, 1);
+  // zumbido espacial: volumen por distancia, paneo según el lado de la pantalla, sube al picar
+  if (e.buzz) {
+    tmp.copy(s.position).sub(camera.position); const dist = tmp.length();
+    const pan = tmp.normalize().dot(right);
+    const facing = tmp.dot(fwd);
+    let vol = clamp(1.6 / (dist * dist * 0.35 + 0.6), 0.05, 1) * (facing > 0 ? 1 : 0.7);
+    let bend = 1;
+    if (e.state === 'warn') { vol = Math.min(1, vol + e.st * 0.4); bend = 1 + e.st * 0.25; }
+    if (e.state === 'dive') { vol = Math.min(1, vol * 1.5 + 0.3); bend = 1.35 + 0.5 / Math.max(0.5, dist); }
+    if (e.state === 'perched') vol *= 0.15;
+    if (!playing) vol *= 0.2;
+    e.buzz.set(vol, pan, bend);
+  }
+}
+const _cr = new THREE.Vector3();
+const camRightOf = (p) => _cr.set(-p.z, 0, p.x).normalize();
 
 function frame() {
   const dt = Math.min(0.05, clock.getDelta());
   update(dt);
   renderer.render(scene, camera);
   drawHud();
+  drawPerches();
 }
 renderer.setAnimationLoop(frame);
 
+/** Marcas sobre los objetos detectados (corchetes + nombre) en el canvas 2D. */
+function drawPerches() {
+  const g = fx2d.getContext('2d'), w = fx2d.width, h = fx2d.height;
+  g.clearRect(0, 0, w, h);
+  if (S.state === 'menu') return;
+  for (const e of enemies) {
+    if (!(e.marked > S.time) || e.state === 'dying') continue;
+    tmp.copy(e.sprite.position).project(camera); if (tmp.z > 1 || Math.abs(tmp.x) > 1 || Math.abs(tmp.y) > 1) continue;
+    const x = (tmp.x * 0.5 + 0.5) * w, y = (-tmp.y * 0.5 + 0.5) * h, r = 34 + Math.sin(S.time * 10) * 5;
+    g.strokeStyle = '#ffe14a'; g.lineWidth = 4; g.beginPath(); g.arc(x, y, r, 0, 7); g.stroke();
+  }
+  if (!perches.length) return;
+  g.font = `600 ${Math.round(clamp(w * 0.03, 11, 16))}px ui-rounded, system-ui, sans-serif`; g.textAlign = 'center';
+  for (const p of perches) {
+    tmp.copy(p.pos).project(camera); if (tmp.z > 1 || Math.abs(tmp.x) > 1.1 || Math.abs(tmp.y) > 1.1) continue;
+    const x = (tmp.x * 0.5 + 0.5) * w, y = (-tmp.y * 0.5 + 0.5) * h;
+    tmp2.copy(p.pos).addScaledVector(camRightOf(p.pos), p.halfW).project(camera);
+    const hw = Math.abs((tmp2.x * 0.5 + 0.5) * w - x);
+    g.strokeStyle = p.occupant?.state === 'perched' ? 'rgba(255,225,74,.9)' : 'rgba(0,255,160,.7)'; g.lineWidth = 2; g.setLineDash([6, 5]);
+    g.beginPath(); g.moveTo(x - hw, y + 10); g.lineTo(x - hw, y); g.lineTo(x + hw, y); g.lineTo(x + hw, y + 10); g.stroke(); g.setLineDash([]);
+    const txt = `${PERCH_ICON[p.label] || '📍'} ${PERCH_NAMES[p.label] || p.label}`;
+    const tw = g.measureText(txt).width + 12, lx = clamp(x, tw / 2 + 4, w - tw / 2 - 4);
+    g.fillStyle = 'rgba(6,4,26,.6)'; g.fillRect(lx - tw / 2, y + 14, tw, 20);
+    g.fillStyle = '#e8f6ff'; g.fillText(txt, lx, y + 29);
+  }
+}
 // ---------------- HUD ----------------
 const last = {};
 function setText(id, v) { if (last[id] !== v) { last[id] = v; $(id).textContent = v; } }
 function setWidth(id, pct) { const v = Math.round(pct) + '%'; if (last[id] !== v) { last[id] = v; $(id).style.width = v; } }
 const cells = $('p-cells');
-for (let i = 0; i < CFG.magazine; i++) cells.appendChild(document.createElement('i'));
+for (let i = 0; i < 20; i++) cells.appendChild(document.createElement('i'));
 
+const DETECT_TXT = { off: 'apagado', loading: 'cargando…', ready: 'listo', error: 'no disponible' };
 function drawHud() {
   setText('h-wave', S.wave || 1); setText('p-wave', S.wave || 1);
   setText('h-score', S.score.toLocaleString('es-CL')); setText('p-score', S.score.toLocaleString('es-CL'));
@@ -422,13 +647,17 @@ function drawHud() {
   setText('h-combo', comboMult() > 1 ? `×${comboMult()}` : '');
   setText('h-hp', Math.ceil(S.hp)); setText('p-hp', Math.ceil(S.hp));
   setText('p-sh', S.shieldBroken ? 'RECARGANDO' : Math.round(S.shield));
-  setWidth('b-hp', S.hp); setWidth('pb-hp', S.hp); setWidth('b-sh', S.shield); setWidth('pb-sh', S.shield);
-  setText('p-left', enemies.length + S.toSpawn);
-  const ammoTxt = S.reloading > 0 ? 'RECARGANDO…' : `${S.ammo} / ${CFG.magazine}`;
-  setText('p-ammo', ammoTxt); setText('h-ammo-mini', S.reloading > 0 ? '…' : String(S.ammo));
+  setWidth('b-hp', S.hp / CFG.maxHp * 100); setWidth('pb-hp', S.hp / CFG.maxHp * 100); setWidth('b-sh', S.shield); setWidth('pb-sh', S.shield);
+  setText('p-left', enemies.filter((e) => e.state !== 'dying').length + S.toSpawn);
+  const pct = Math.round(S.spray / CFG.sprayMax * 100);
+  setText('p-ammo', S.shaking > 0 ? 'AGITANDO…' : `${pct}%`); setText('h-ammo-mini', S.shaking > 0 ? '…' : `${pct}%`);
   setText('p-acc', S.shots ? Math.round((S.hits / S.shots) * 100) + '%' : '–');
-  if (last.cells !== S.ammo) { last.cells = S.ammo; [...cells.children].forEach((c, i) => c.classList.toggle('off', i >= S.ammo || S.reloading > 0)); }
-  $('btn-reload').classList.toggle('reloading', S.reloading > 0);
+  const on = Math.round(S.spray / CFG.sprayMax * 20);
+  if (last.cells !== on) { last.cells = on; [...cells.children].forEach((c, i) => c.classList.toggle('off', i >= on)); }
+  const det = !S.detectOn ? 'apagado' : S.mode !== 'ar' ? 'solo con cámara' : DETECT_TXT[spotter.status] + (spotter.status === 'ready' ? ` (${spotter.delegate})` : '');
+  setText('p-detect', det);
+  setText('p-perch', perches.length ? perches.map((p) => PERCH_NAMES[p.label] || p.label).join(', ') : '—');
+  $('btn-reload').classList.toggle('reloading', S.shaking > 0);
   $('btn-shield').classList.toggle('empty', S.shieldBroken);
   const lay = getLayout();
   drawRadar($('radar'), true);
@@ -444,34 +673,34 @@ function drawRadar(cv, big) {
   g.fillStyle = 'rgba(6,4,26,.55)'; g.beginPath(); g.arc(0, 0, R - 2, 0, Math.PI * 2); g.fill();
   g.strokeStyle = 'rgba(0,240,255,.5)'; g.lineWidth = big ? 2 : 3;
   for (const k of [0.33, 0.66, 1]) { g.beginPath(); g.arc(0, 0, (R - 3) * k, 0, Math.PI * 2); g.stroke(); }
-  // cono de visión
-  const half = (camera.fov * camera.aspect / 2) * Math.PI / 180;
+  const half = (camera.fov * camera.aspect / 2) * DEG;
   g.fillStyle = 'rgba(0,255,160,.14)'; g.beginPath(); g.moveTo(0, 0); g.arc(0, 0, R - 3, -Math.PI / 2 - half, -Math.PI / 2 + half); g.closePath(); g.fill();
   camera.getWorldDirection(tmp2);
   const camYaw = Math.atan2(tmp2.x, tmp2.z);
-  const range = 11;
-  const dot = (pos, color, size) => {
+  const range = 8;
+  const dot = (pos, color, size, square) => {
     const dx = pos.x - camera.position.x, dz = pos.z - camera.position.z;
     const ang = Math.atan2(dx, dz) - camYaw;
     const d = Math.min(1, Math.hypot(dx, dz) / range) * (R - 8);
     const x = -Math.sin(ang) * d, y = -Math.cos(ang) * d;
     g.fillStyle = color; g.shadowColor = color; g.shadowBlur = 8;
-    g.beginPath(); g.arc(x, y, size, 0, Math.PI * 2); g.fill();
+    if (square) g.fillRect(x - size, y - size / 2, size * 2, size); else { g.beginPath(); g.arc(x, y, size, 0, Math.PI * 2); g.fill(); }
   };
-  for (const e of enemies) dot(e.mesh.position, e.charging ? '#ffffff' : '#' + e.t.core.toString(16).padStart(6, '0'), (big ? 9 : 12) * e.t.scale);
-  for (const b of bolts) dot(b.mesh.position, '#ff8a3a', big ? 4 : 6);
+  for (const p of perches) dot(p.pos, '#00ffa0', big ? 8 : 11, true);
+  for (const n of nests) if (n.full) dot(n.sprite.position, '#3fc9ff', big ? 10 : 13, true);
+  for (const e of enemies) if (e.state !== 'dying') dot(e.sprite.position, e.marked > S.time ? '#ffe14a' : e.state === 'warn' || e.state === 'dive' ? '#ffffff' : e.state === 'perched' ? '#ffe14a' : '#ff3c5a', (big ? 8 : 11) * e.t.size / 0.62);
   g.shadowBlur = 0; g.fillStyle = '#00ffa0'; g.beginPath(); g.moveTo(0, -10); g.lineTo(7, 8); g.lineTo(-7, 8); g.closePath(); g.fill();
   g.restore();
 }
 
-/** Flechas en el borde para enemigos fuera de pantalla. */
+/** Flechas en el borde para zancudos fuera de pantalla (blancas si vienen picando). */
 const arrowsEl = $('arrows'); const arrowPool = [];
 function drawArrows() {
   let n = 0;
   const w = stage.clientWidth, h = stage.clientHeight;
   for (const e of enemies) {
-    if (e.entering || n >= 8) continue;
-    tmp.copy(e.mesh.position).project(camera);
+    if (e.state === 'enter' || e.state === 'dying' || n >= 8) continue;
+    tmp.copy(e.sprite.position).project(camera);
     const behind = tmp.z > 1;
     let x = tmp.x, y = tmp.y;
     if (!behind && Math.abs(x) < 1 && Math.abs(y) < 1) continue;
@@ -482,7 +711,7 @@ function drawArrows() {
     a.style.display = 'block';
     a.style.left = clamp(px, 24, w - 24) - 10 + 'px'; a.style.top = clamp(py, 90, h - 40) - 9 + 'px';
     a.style.transform = `rotate(${Math.atan2(x, y)}rad)`;
-    a.style.borderBottomColor = e.charging ? '#fff' : '';
+    a.style.borderBottomColor = e.marked > S.time ? '#ffe14a' : e.state === 'warn' || e.state === 'dive' ? '#fff' : '';
     n++;
   }
   for (let i = n; i < arrowPool.length; i++) arrowPool[i].style.display = 'none';
@@ -491,6 +720,33 @@ function drawArrows() {
 let toastT = 0;
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 1600); }
 function flashCross(c) { const x = $('crosshair'); x.classList.add(c); setTimeout(() => x.classList.remove(c), 70); }
+function floatText(msg) {
+  const el = document.createElement('div'); el.className = 'float'; el.textContent = msg;
+  el.style.left = `${rand(38, 62)}%`; $('stage').appendChild(el); setTimeout(() => el.remove(), 900);
+}
+
+// ---------------- Datos educativos ----------------
+const FACTS = [
+  'Solo las hembras de zancudo pican: necesitan proteínas de la sangre para formar sus huevos.',
+  'Los zancudos machos no pican: se alimentan del néctar de las flores.',
+  'El “bzzz” es el aleteo: un zancudo bate sus alas cientos de veces por segundo.',
+  'Te encuentran por el CO₂ que exhalas, el calor de tu cuerpo y el olor de tu piel.',
+  'Ponen sus huevos en agua estancada: vaciar platos de maceteros, baldes y neumáticos evita que se reproduzcan.',
+  'Algunos zancudos, como el Aedes aegypti, pueden transmitir dengue. En Chile está en Rapa Nui y se vigila en el norte.',
+  'Las libélulas, las arañas, las aves y los murciélagos comen zancudos: son parte de la cadena alimenticia.',
+  'Un zancudo pesa unos 2 a 3 miligramos: ¡necesitarías cerca de medio millón para juntar un kilo!',
+  'Los mosquiteros y el repelente protegen sin químicos en el aire de la pieza.',
+  'En la vida real, el insecticida se usa con la pieza ventilada, lejos de la comida y de las mascotas. ¡Aquí es solo un juego!',
+  'Los zancudos viven entre dos semanas y un par de meses, según la especie y el clima.',
+  'Muchas larvas de zancudo viven en el agua y respiran por un tubito, como un snorkel.',
+];
+let factI = Math.floor(Math.random() * FACTS.length);
+const nextFact = () => FACTS[factI++ % FACTS.length];
+let factT = 0;
+function showFact() {
+  const el = $('dato'); el.textContent = '¿Sabías que…? ' + nextFact(); el.classList.add('show');
+  clearTimeout(factT); factT = setTimeout(() => el.classList.remove('show'), 4200);
+}
 
 // ---------------- Tamaño / FOV ----------------
 function resize() {
@@ -500,7 +756,7 @@ function resize() {
   const fx = S.mode === 'ar' && video.videoWidth ? matchCameraFov(video, stage) : null;
   camera.fov = fx || (w > h ? 50 : 68);
   camera.updateProjectionMatrix();
-  const fx2 = $('fx2d'); fx2.width = w; fx2.height = h;
+  fx2d.width = w; fx2d.height = h;
 }
 new ResizeObserver(resize).observe(stage);
 video.addEventListener('loadedmetadata', resize);
@@ -509,41 +765,52 @@ initLayout();
 
 // ---------------- Flujo de juego ----------------
 function resetGame() {
-  for (const e of [...enemies]) scene.remove(e.mesh); enemies.length = 0;
-  for (const b of [...bolts]) scene.remove(b.mesh); bolts.length = 0;
+  for (const e of [...enemies]) removeEnemy(e);
+  for (const p of puffs) scene.remove(p.s); puffs.length = 0;
+  perches.length = 0; S.spotted.clear();
+  for (const n of nests) scene.remove(n.sprite); nests.length = 0;
+  sprayStop();
   Object.assign(S, { score: 0, wave: 0, toSpawn: 0, spawnTimer: 0, interTimer: 0, hp: CFG.maxHp, shield: CFG.maxShield, shieldBroken: false,
-    ammo: CFG.magazine, reloading: 0, fireCd: 0, combo: 0, comboTimer: 0, shots: 0, hits: 0, kills: 0, firing: false, shielding: false });
+    spray: CFG.sprayMax, shaking: 0, sprayIdle: 0, tickCd: 0, combo: 0, comboTimer: 0, shots: 0, hits: 0, kills: 0, perchKills: 0, avoided: 0, bites: 0, nests: 0,
+    firing: false, shielding: false, wasFiring: false, diveCd: 5, perchCd: 2 });
+  if (S.mode === 'holo') addOrUpdatePerch('tv', holodeck.userData.tvTop, 0.55, true);
 }
 function show(id, on) { $(id).classList.toggle('show', on); }
 function beginPlay() {
-  resetGame();
   ['menu', 'over', 'pause'].forEach((o) => show(o, false));
+  aim.recenter(); aim.update(); camera.updateMatrixWorld();
+  resetGame();
   S.state = 'playing';
-  aim.recenter();
   setTimeout(startWave, 400);
   requestWakeLock();
+  if (S.mode === 'ar' && S.detectOn) { spotter.load().then(() => scheduleDetect()); }
 }
 function gameOver() {
   S.state = 'over'; S.firing = false; S.shielding = false; document.body.classList.remove('shielding');
+  sprayStop(); for (const e of enemies) e.buzz?.set(0.05, 0, 1);
   sfx.over();
   const newBest = S.score > S.best;
   if (newBest) { S.best = S.score; localStorage.setItem('an-best', S.best); }
   $('o-score').textContent = S.score.toLocaleString('es-CL');
-  $('o-detail').textContent = `Oleada ${S.wave} · ${S.kills} drones · precisión ${S.shots ? Math.round(S.hits / S.shots * 100) : 0}%`;
+  $('o-detail').innerHTML = `<div class="resumen">
+    <div><b>${S.kills}</b><span>cazados</span></div><div><b>${S.avoided}</b><span>picadas evitadas</span></div>
+    <div><b>${S.nests}</b><span>criaderos eliminados</span></div><div><b>${S.perchKills}</b><span>posados</span></div>
+    <div><b>${S.bites}</b><span>picadas recibidas</span></div><div><b>${S.shots ? Math.round(S.hits / S.shots * 100) : 0}%</b><span>puntería</span></div></div>
+    <p class="mini">Llegaste a la oleada ${S.wave} · Álbum ${albumCount()}</p>`;
+  $('o-tip').textContent = '💡 Consejo: ' + TIPS[Math.floor(Math.random() * TIPS.length)];
   $('o-best').textContent = newBest ? '¡Nuevo récord!' : `Récord: ${S.best.toLocaleString('es-CL')}`;
+  $('o-fact').textContent = '¿Sabías que…? ' + nextFact();
   setTimeout(() => show('over', true), 700);
 }
 function pause(on) {
   if (S.state !== 'playing' && S.state !== 'paused') return;
-  S.state = on ? 'paused' : 'playing'; S.firing = false; S.shielding = false;
+  S.state = on ? 'paused' : 'playing'; S.firing = false; S.shielding = false; sprayStop(); S.wasFiring = false;
   show('pause', on);
 }
 
 async function startAR(withCamera) {
   initAudio();
-  // 1) Permiso de movimiento: debe pedirse sincrónicamente dentro del toque (iOS)
-  const motionP = requestMotionPermission();
-  // 2) Cámara trasera
+  const motionP = requestMotionPermission(); // iOS: debe pedirse dentro del toque
   let camOK = false;
   if (withCamera) camOK = await startCamera(video);
   const motionOK = await motionP;
@@ -556,7 +823,6 @@ async function startAR(withCamera) {
   beginPlay();
 }
 
-// WebXR immersive-ar real (Android Chrome / visores). En iPhone Safari no existe: se usa cámara + IMU.
 async function checkXR() {
   let ok = false;
   try { ok = !!(navigator.xr && await navigator.xr.isSessionSupported('immersive-ar')); } catch { ok = false; }
@@ -575,7 +841,6 @@ async function startXR() {
     await renderer.xr.setSession(session);
     S.mode = 'xr'; holodeck.visible = false;
     session.addEventListener('end', () => { renderer.xr.enabled = false; S.mode = 'ar'; S.state = 'menu'; show('menu', true); });
-    camBase.set(0, 0, 0);
     beginPlay();
   } catch (e) { toast('No se pudo iniciar WebXR'); console.warn(e); }
 }
@@ -583,21 +848,23 @@ async function startXR() {
 // ---------------- Controles ----------------
 function hold(btn, onDown, onUp) {
   btn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); btn.setPointerCapture?.(e.pointerId); btn.classList.add('active'); onDown(); });
-  const up = (e) => { btn.classList.remove('active'); onUp && onUp(); };
+  const up = () => { btn.classList.remove('active'); onUp && onUp(); };
   ['pointerup', 'pointercancel', 'lostpointercapture'].forEach((ev) => btn.addEventListener(ev, up));
 }
-hold($('btn-fire'), () => { initAudio(); if (S.state === 'playing') { S.firing = true; if (S.fireCd <= 0) playerShoot(); } }, () => (S.firing = false));
+hold($('btn-fire'), () => { initAudio(); S.firing = S.state === 'playing'; }, () => (S.firing = false));
 hold($('btn-shield'), () => (S.shielding = S.state === 'playing'), () => (S.shielding = false));
-hold($('btn-reload'), () => startReload());
+hold($('btn-reload'), () => shakeCan());
 hold($('btn-panel'), () => document.body.classList.toggle('panel-open'));
 
-// Tocar la vista AR también dispara (mantener = ráfaga). Sin sensores: arrastrar para mirar.
+// Tocar la vista AR también rocía (mantener = spray continuo). Sin sensores: arrastrar para mirar.
 const touches = new Map();
+let tapTimer = 0;
 stage.addEventListener('pointerdown', (e) => {
   if (e.target.closest('.ctl')) return;
+  if (S.state === 'playing') tapNest(e.clientX, e.clientY);
   if (document.body.classList.contains('panel-open')) { document.body.classList.remove('panel-open'); return; }
   touches.set(e.pointerId, { x: e.clientX, y: e.clientY, moved: 0 });
-  if (aim.has) { S.firing = S.state === 'playing'; if (S.firing && S.fireCd <= 0) playerShoot(); }
+  if (aim.has) S.firing = S.state === 'playing';
 });
 stage.addEventListener('pointermove', (e) => {
   const t = touches.get(e.pointerId); if (!t || aim.has) return;
@@ -605,18 +872,18 @@ stage.addEventListener('pointermove', (e) => {
 });
 const endTouch = (e) => {
   const t = touches.get(e.pointerId); touches.delete(e.pointerId);
-  if (!aim.has && t && t.moved < 8 && S.state === 'playing') playerShoot(); // tap sin sensores = un disparo
+  if (!aim.has && t && t.moved < 8 && S.state === 'playing') { S.firing = true; clearTimeout(tapTimer); tapTimer = setTimeout(() => (S.firing = false), 350); } // tap = pssst corto
   if (touches.size === 0 && aim.has) S.firing = false;
 };
 stage.addEventListener('pointerup', endTouch); stage.addEventListener('pointercancel', endTouch);
 
-// Teclado (para probar en PC): Espacio = fuego, Shift = escudo, R = recargar, P = pausa, flechas = mirar
+// Teclado (PC): Espacio = spray, Shift = manotazo, R = agitar, P = pausa, flechas = mirar
 const keys = new Set();
 addEventListener('keydown', (e) => {
   if (e.repeat) return; keys.add(e.code);
   if (e.code === 'Space') { S.firing = S.state === 'playing'; e.preventDefault(); }
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') S.shielding = S.state === 'playing';
-  if (e.code === 'KeyR') startReload();
+  if (e.code === 'KeyR') shakeCan();
   if (e.code === 'KeyP' || e.code === 'Escape') pause(S.state === 'playing');
 });
 addEventListener('keyup', (e) => {
@@ -629,12 +896,25 @@ setInterval(() => { if (aim.has) return; const k = 4; if (keys.has('ArrowLeft'))
 $('btn-start').addEventListener('click', () => startAR(true));
 $('btn-start-nocam').addEventListener('click', () => startAR(false));
 $('btn-restart').addEventListener('click', () => { initAudio(); beginPlay(); });
-$('btn-menu').addEventListener('click', () => { show('over', false); show('menu', true); S.state = 'menu'; updateMenuBest(); });
+$('btn-menu').addEventListener('click', () => { show('over', false); show('menu', true); resetGame(); S.state = 'menu'; updateMenuBest(); });
 $('btn-resume').addEventListener('click', () => pause(false));
 $('btn-quit').addEventListener('click', () => { show('pause', false); resetGame(); S.state = 'menu'; show('menu', true); updateMenuBest(); });
 $('btn-pause').addEventListener('click', () => pause(true));
 $('btn-recenter').addEventListener('click', () => { aim.recenter(); toast('RECENTRADO'); });
 $('btn-layout').addEventListener('click', () => cycleForcedLayout());
+const detBtn = $('btn-detect');
+const paintDet = () => (detBtn.textContent = `Posarse en objetos: ${S.detectOn ? 'sí' : 'no'}`);
+paintDet();
+detBtn.addEventListener('click', () => {
+  S.detectOn = !S.detectOn; localStorage.setItem('an-detect', S.detectOn ? 'on' : 'off'); paintDet();
+  if (S.detectOn && S.state === 'playing' && S.mode === 'ar') spotter.load().then(() => scheduleDetect());
+  if (!S.detectOn) { for (const p of [...perches]) if (!p.fake) perches.splice(perches.indexOf(p), 1); }
+});
+$('btn-coop').addEventListener('click', () => { S.coop = !S.coop; localStorage.setItem('an-coop', S.coop ? 'on' : 'off'); applyCoop(); if (S.coop) toast('COPILOTO: toca el radar para marcar'); });
+applyCoop();
+const openAlbum = () => { renderAlbum($('album-grid'), CRIADERO_URL); $('album-count').textContent = albumCount(); show('album', true); };
+$('btn-album').addEventListener('click', openAlbum); $('btn-album2').addEventListener('click', openAlbum);
+$('btn-album-close').addEventListener('click', () => show('album', false));
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(true); });
 
 function updateMenuBest() { $('m-best').textContent = S.best ? `Récord: ${S.best.toLocaleString('es-CL')}` : ''; }
@@ -646,10 +926,10 @@ let wakeLock = null;
 async function requestWakeLock() { try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* opcional */ } }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && S.state !== 'menu') requestWakeLock(); });
 
-// Instalación PWA (service worker para que abra rápido y funcione offline)
+// PWA: service worker (red primero, caché offline)
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
-// Si ya está instalada, ocultamos las instrucciones
 if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) $('install').style.display = 'none';
 
-// Exponer para depurar desde consola
-window.__asedio = { S, enemies, camera, spawnEnemy };
+// Para depurar / pruebas automáticas desde la consola
+window.__asedio = { gameOver, S, enemies, perches, nests, emptyNest, tapNest, radarPick, shakeCan, camera, aim, spawnEnemy, spotter, addOrUpdatePerch, runDetector, CFG,
+  aimAt(e) { const p = e.sprite.position; aim.dragYaw = Math.atan2(-p.x, -p.z); aim.dragPitch = Math.asin(p.y / p.length()); } };
