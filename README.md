@@ -1,6 +1,10 @@
 Juego en vivo: https://millo-games.github.io/asedio-neon/
 
-# Asedio Neón · Millo Games — Invasión de zancudos
+# ¡Zancudos al Ataque! 🦟💨 · Millo Games
+
+![¡Zancudos al Ataque!](promo/zancudos.gif)
+
+> Antes se llamaba **Asedio Neón**. La URL (`/asedio-neon/`) y el repo se mantienen igual para no romper los links ya compartidos.
 
 Juego de **realidad aumentada en tu pieza** pensado para el **iPhone Duo** (plegable) y jugable en cualquier iPhone.
 Te quedas parado, giras con el teléfono, apuntas con la mira y les tiras **insecticida** a zancudos estilo cómic que zumban frente a ti.
@@ -51,12 +55,21 @@ Zumbido "bzzz" por zancudo con paneo izquierda/derecha y volumen según la dista
 - Si el modelo no carga (sin red la primera vez, navegador antiguo), el juego sigue normal, solo que sin posarse. Se puede apagar en el panel: **Posarse en objetos: sí/no**.
 - En **modo holodeck** (sin cámara) hay una tele virtual para que igual se posen.
 
+## Compartir
+- Link: **https://millo-games.github.io/asedio-neon/** (con vista previa: imagen `promo/og-zancudos.jpg` de 1200×630, título y descripción con Open Graph y Twitter Card).
+- Promo animada para mandar junto al link: `promo/zancudos.mp4` (1080×1080, H.264, ideal para WhatsApp) y `promo/zancudos.gif` (400×400).
+- WhatsApp guarda la vista previa vieja un tiempo: si sale "Asedio Neón", comparte el link con `?v=2` al final.
+
+## Pantalla completa
+- Botón de pantalla completa en el HUD y en el menú (Fullscreen API, también `webkitRequestFullscreen`).
+- En **iPhone** Safari no permite pantalla completa para páginas (solo para videos): el juego avisa *"Compartir → Agregar a pantalla de inicio"*. Instalada así, abre sin barras (`display: fullscreen` con respaldo `standalone`, `viewport-fit=cover`, barra de estado translúcida).
+
 ## Instalar en el iPhone
 1. Abre la URL en **Safari** (la cámara y los sensores exigen HTTPS).
 2. Toca **Compartir** → **Añadir a pantalla de inicio** → **Añadir**.
-3. Abre **Asedio Neón** desde el ícono y toca **JUGAR EN AR**.
+3. Abre **Zancudos** desde el ícono y toca **JUGAR EN AR**.
 4. Acepta **Movimiento y orientación** y **Cámara**. Si los rechazaste: Ajustes → Safari → Configuración del sitio, o borra el ícono y vuelve a agregarlo.
-5. Si tenías la versión anterior instalada, ciérrala y ábrela de nuevo (el service worker nuevo, `asedio-neon-v3-audio`, reemplaza la caché vieja).
+5. Si tenías la versión anterior instalada, ciérrala y ábrela de nuevo (el service worker nuevo, `zancudos-v4-marca`, reemplaza la caché vieja). Para ver el ícono nuevo hay que borrar el ícono viejo de la pantalla de inicio y volver a agregarlo.
 
 ## Pantallas: Duo cerrado vs abierto
 | Situación | Layout |
@@ -90,6 +103,8 @@ js/detector.js          MediaPipe Object Detector (local con respaldo CDN, degra
 js/audio.js             sonidos WebAudio sintetizados (zumbido espacial, spray, plop, tos, auch)
 js/sensors.js           cámara trasera, permisos iOS, orientación → cámara 3D, FOV
 js/layout.js            detección Duo (segmentos / tamaño) y modo forzado
+assets/fonts/           Bangers (licencia OFL) para el título
+promo/                  imagen para compartir (og), GIF y MP4 promocionales
 assets/sprites/         zancudos (aleteo 4 cuadros, muerto, explorador, acorazado) y mano (6 cuadros), WebP
 vendor/                 Three.js r170 y MediaPipe Tasks Vision 1.2.2 (Apache-2.0)
 models/                 efficientdet_lite0.tflite (int8, COCO)

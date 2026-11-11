@@ -1,5 +1,5 @@
 // ==========================================================
-// Asedio Neón · Millo Games — Invasión de zancudos AR
+// ¡Zancudos al Ataque! · Millo Games — invasión de zancudos en AR (antes "Asedio Neón")
 // Quédate en tu sitio, gira el teléfono, apunta y rocíales insecticida.
 // Render: Three.js sobre el video de la cámara trasera. Apuntado: orientación del teléfono (3DoF).
 // Los zancudos se posan sobre objetos reales que detecta MediaPipe (tele, sillón, mesa…).
@@ -946,6 +946,43 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && S.
 // PWA: service worker (red primero, caché offline)
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
 if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) $('install').style.display = 'none';
+
+
+// ---------------- Portada animada ----------------
+{
+  let k = 0;
+  for (const line of document.querySelectorAll('#title > span')) {
+    line.innerHTML = [...line.textContent].map((ch) => `<i class="${'¡!'.includes(ch) ? 'excl' : ''}" style="animation-delay:${(k++ * 0.07).toFixed(2)}s">${ch === ' ' ? '&nbsp;' : ch}</i>`).join('');
+  }
+  const mq = document.querySelector('#logo-anim .mq'), seq = [2, 3, 4, 3]; let f = 0;
+  setInterval(() => { if (S.state === 'menu') mq.src = `assets/sprites/zancudo_${seq[f++ % 4]}.webp`; }, 60);
+}
+
+// ---------------- Pantalla completa ----------------
+const isStandalone = () => matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches || navigator.standalone;
+const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement;
+function toggleFullscreen(e) {
+  e?.preventDefault(); e?.stopPropagation(); unlockAudio();
+  const el = document.documentElement;
+  if (fsElement()) { (document.exitFullscreen || document.webkitExitFullscreen)?.call(document); return; }
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  const hint = () => toast(isStandalone() ? 'Ya estás en pantalla completa' : 'En iPhone: Compartir → Agregar a pantalla de inicio para jugar a pantalla completa');
+  if (!req) { hint(); return; }
+  try {
+    const r = req.call(el, { navigationUI: 'hide' });
+    if (r && r.catch) r.catch(hint);
+    setTimeout(() => { if (!fsElement()) hint(); }, 600);
+  } catch { hint(); }
+}
+$('btn-fs').addEventListener('pointerdown', toggleFullscreen);
+$('btn-fs-menu').addEventListener('click', toggleFullscreen);
+const FS_ON = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"/></svg>';
+const FS_OFF = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6"/></svg>';
+const paintFs = () => { const on = !!fsElement(); $('btn-fs').innerHTML = on ? FS_OFF : FS_ON; $('btn-fs-menu').innerHTML = (on ? FS_OFF : FS_ON) + (on ? ' Salir de pantalla completa' : ' Pantalla completa'); };
+paintFs();
+document.addEventListener('fullscreenchange', () => { paintFs(); requestAnimationFrame(resize); });
+document.addEventListener('webkitfullscreenchange', () => { paintFs(); requestAnimationFrame(resize); });
+if (isStandalone()) $('btn-fs-menu').style.display = 'none';
 
 // Para depurar / pruebas automáticas desde la consola
 window.__asedio = { audioState, outputLevel, musicCtl, gameOver, S, enemies, perches, nests, emptyNest, tapNest, radarPick, shakeCan, camera, aim, spawnEnemy, spotter, addOrUpdatePerch, runDetector, CFG,

@@ -1,5 +1,5 @@
 // ==========================================================
-// Audio de Asedio Neón: todo sintetizado con WebAudio (sin archivos con licencia).
+// Audio de ¡Zancudos al Ataque!: todo sintetizado con WebAudio (sin archivos con licencia).
 // - Desbloqueo para iOS Safari / PWA: el AudioContext se crea y se reanuda DENTRO del toque,
 //   se toca un buffer silencioso, se pide navigator.audioSession.type = 'playback' (iOS 17+)
 //   y se reproduce en loop un <audio> HTML silencioso, que pone la sesión en "playback"

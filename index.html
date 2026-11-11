@@ -4,15 +4,37 @@
   <meta charset="utf-8">
   <!-- viewport-fit=cover: usamos toda la pantalla y respetamos safe-area con env() -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-  <title>Asedio Neón · Millo Games</title>
-  <meta name="theme-color" content="#06041a">
+  <title>¡Zancudos al Ataque! · Millo Games</title>
+  <meta name="description" content="🦟 ¡Los zancudos invadieron tu pieza! Agarra el spray, apunta con el celular y no dejes que te piquen. Juego AR gratis en el navegador 📱💨">
+  <!-- Vista previa al compartir (WhatsApp, Telegram, X, Facebook, iMessage) -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Millo Games">
+  <meta property="og:locale" content="es_CL">
+  <meta property="og:title" content="¡Zancudos al Ataque! 🦟💨">
+  <meta property="og:description" content="🦟 ¡Los zancudos invadieron tu pieza! Agarra el spray, apunta con el celular y no dejes que te piquen. Juego AR gratis en el navegador 📱💨">
+  <meta property="og:url" content="https://millo-games.github.io/asedio-neon/">
+  <meta property="og:image" content="https://millo-games.github.io/asedio-neon/promo/og-zancudos.jpg">
+  <meta property="og:image:secure_url" content="https://millo-games.github.io/asedio-neon/promo/og-zancudos.jpg">
+  <meta property="og:image:type" content="image/jpeg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Un zancudo de cómic enojado y una mano con spray insecticida: ¡Zancudos al Ataque!">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="¡Zancudos al Ataque! 🦟💨">
+  <meta name="twitter:description" content="🦟 ¡Los zancudos invadieron tu pieza! Agarra el spray, apunta con el celular y no dejes que te piquen. Juego AR gratis en el navegador 📱💨">
+  <meta name="twitter:image" content="https://millo-games.github.io/asedio-neon/promo/og-zancudos.jpg">
+  <meta name="twitter:image:alt" content="Zancudo de cómic y spray insecticida">
+  <meta name="theme-color" content="#14101f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Asedio Neón">
+  <meta name="apple-mobile-web-app-title" content="Zancudos">
+  <meta name="application-name" content="Zancudos">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
-  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="layout-compacto">
@@ -28,6 +50,7 @@
         <div class="pill score"><b id="h-score">0</b><span id="h-combo" class="combo"></span></div>
         <div class="pill"><span class="lbl">♥</span><b id="h-hp">100</b></div>
         <button id="btn-sound" class="pill snd" aria-label="Sonido">🔊</button>
+        <button id="btn-fs" class="pill snd" aria-label="Pantalla completa">⛶</button>
       </div>
       <div id="hud-bars" class="hud">
         <div class="bar hp"><i id="b-hp"></i></div>
@@ -60,7 +83,7 @@
 
     <!-- PANEL LATERAL: en Duo abierto es una columna fija; en pantalla única es un cajón desplegable -->
     <aside id="panel">
-      <header><b>ASEDIO NEÓN</b><span>MILLO GAMES</span></header>
+      <header><b>¡ZANCUDOS AL ATAQUE!</b><span>MILLO GAMES</span></header>
       <p class="coop-tip">👥 <b>Copiloto</b>: toca el radar donde veas un zancudo para marcárselo al que apunta.</p>
       <canvas id="radar" width="400" height="400"></canvas>
       <div class="stat"><span>Puntaje</span><b id="p-score">0</b></div>
@@ -92,14 +115,18 @@
   <!-- MENÚ / START -->
   <section id="menu" class="overlay show">
     <div class="card">
-      <img src="icons/icon-192.png" alt="" class="logo">
-      <h1>ASEDIO NEÓN</h1>
-      <p class="sub">Millo Games · Invasión de zancudos</p>
+      <div id="logo-anim" aria-hidden="true">
+        <img class="mq" src="assets/sprites/zancudo_2.webp" alt="">
+        <span class="puff p1"></span><span class="puff p2"></span><span class="puff p3"></span>
+      </div>
+      <h1 id="title" class="comic" aria-label="¡Zancudos al Ataque!"><span class="l1">¡ZANCUDOS</span><span class="l2">AL ATAQUE!</span></h1>
+      <p class="sub">Millo Games · Juego AR en tu pieza</p>
       <p>¡Los zancudos invadieron tu pieza! Quédate en tu sitio, gira el teléfono, apunta con la mira y mantén <b>SPRAY</b>. Cuando uno zumbe más fuerte y se ponga rojo, viene a picarte: rocíalo o dale un <b>MANOTAZO</b>. Vacía los <b>criaderos</b> (baldes, neumáticos, floreros con agua) para que no salgan más. Si se posan en la tele o el sillón, ¡valen el doble! Cuando se acabe el spray, <b>agita el iPhone</b>.</p>
       <button id="btn-start" class="big">▶ JUGAR EN AR</button>
       <button id="btn-start-nocam" class="ghost">Jugar sin cámara (modo holodeck)</button>
       <button id="btn-album" class="ghost">📖 Álbum de láminas</button>
       <button id="btn-sound-menu" class="ghost">🔊 Sonido: sí</button>
+      <button id="btn-fs-menu" class="ghost">⛶ Pantalla completa</button>
       <p class="perm">Te vamos a pedir <b>cámara</b> (fondo real y para reconocer muebles, todo dentro del teléfono) y <b>movimiento y orientación</b> (para apuntar girando el teléfono). Nada se graba ni se envía.</p>
       <details id="install">
         <summary>📲 Instalar en el iPhone</summary>
@@ -107,7 +134,7 @@
           <li>Abre este link en <b>Safari</b>.</li>
           <li>Toca <b>Compartir</b> (cuadrado con flecha).</li>
           <li>Elige <b>Añadir a pantalla de inicio</b> → <b>Añadir</b>.</li>
-          <li>Abre <b>Asedio Neón</b> desde el ícono: corre a pantalla completa.</li>
+          <li>Abre <b>Zancudos</b> desde el ícono: corre a pantalla completa.</li>
         </ol>
         <p class="mini">Es una app web instalable (PWA), no una app de App Store.</p>
       </details>
