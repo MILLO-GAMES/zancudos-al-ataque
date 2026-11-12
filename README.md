@@ -1,10 +1,10 @@
-Juego en vivo: https://millo-games.github.io/asedio-neon/
+Juego en vivo: https://millo-games.github.io/zancudos-al-ataque/
 
 # ¡Zancudos al Ataque! 🦟💨 · Millo Games
 
 ![¡Zancudos al Ataque!](promo/zancudos.gif)
 
-> Antes se llamaba **Asedio Neón**. La URL (`/asedio-neon/`) y el repo se mantienen igual para no romper los links ya compartidos.
+> Antes se llamaba **Asedio Neón**. El juego vive en **https://millo-games.github.io/zancudos-al-ataque/**. El link viejo (`/asedio-neon/`) redirige al nuevo.
 
 Juego de **realidad aumentada en tu pieza** pensado para el **iPhone Duo** (plegable) y jugable en cualquier iPhone.
 Te quedas parado, giras con el teléfono, apuntas con la mira y les tiras **insecticida** a zancudos estilo cómic que zumban frente a ti.
@@ -56,9 +56,9 @@ Zumbido "bzzz" por zancudo con paneo izquierda/derecha y volumen según la dista
 - En **modo holodeck** (sin cámara) hay una tele virtual para que igual se posen.
 
 ## Compartir
-- Link: **https://millo-games.github.io/asedio-neon/** (con vista previa: imagen `promo/og-zancudos.jpg` de 1200×630, título y descripción con Open Graph y Twitter Card).
+- Link: **https://millo-games.github.io/zancudos-al-ataque/** (con vista previa: imagen `promo/og-zancudos.jpg` de 1200×630, título y descripción con Open Graph y Twitter Card). El link anterior `https://millo-games.github.io/asedio-neon/` redirige acá.
 - Promo animada para mandar junto al link: `promo/zancudos.mp4` (1080×1080, H.264, ideal para WhatsApp) y `promo/zancudos.gif` (400×400).
-- WhatsApp guarda la vista previa vieja un tiempo: si sale "Asedio Neón", comparte el link con `?v=2` al final.
+- Si WhatsApp muestra una vista previa vieja, comparte el link nuevo con `?v=2` al final.
 
 ## Pantalla completa
 - Botón de pantalla completa en el HUD y en el menú (Fullscreen API, también `webkitRequestFullscreen`).
@@ -69,7 +69,7 @@ Zumbido "bzzz" por zancudo con paneo izquierda/derecha y volumen según la dista
 2. Toca **Compartir** → **Añadir a pantalla de inicio** → **Añadir**.
 3. Abre **Zancudos** desde el ícono y toca **JUGAR EN AR**.
 4. Acepta **Movimiento y orientación** y **Cámara**. Si los rechazaste: Ajustes → Safari → Configuración del sitio, o borra el ícono y vuelve a agregarlo.
-5. Si tenías la versión anterior instalada, ciérrala y ábrela de nuevo (el service worker nuevo, `zancudos-v4-marca`, reemplaza la caché vieja). Para ver el ícono nuevo hay que borrar el ícono viejo de la pantalla de inicio y volver a agregarlo.
+5. Si tenías la versión instalada desde el link viejo (`/asedio-neon/`), bórrala de la pantalla de inicio y agrégala de nuevo desde la URL nueva. El service worker `zancudos-v5-link` reemplaza la caché anterior.
 
 ## Pantallas: Duo cerrado vs abierto
 | Situación | Layout |
