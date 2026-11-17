@@ -12,6 +12,9 @@ import { ObjectSpotter, PERCH_NAMES, PERCH_ICON } from './detector.js';
 import { drawCriadero, unlockCard, renderAlbum, albumCount, listenShake } from './extras.js';
 
 const $ = (id) => document.getElementById(id);
+function nativeHaptic(level) {
+  try { window.__zaNative?.haptic?.(level); } catch { /* puente nativo opcional */ }
+}
 const stage = $('stage'), video = $('cam'), glCanvas = $('gl'), fx2d = $('fx2d');
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -146,6 +149,7 @@ function killEnemy(e) {
   e.vel.set(rand(-0.3, 0.3), 0.8, 0);
   fog(e.sprite.position, 6);
   sfx.plop(); if (Math.random() < 0.6) setTimeout(() => sfx.cough(), 120);
+  nativeHaptic('light');
   S.kills++; if (wasPerched) S.perchKills++;
   S.combo++; S.comboTimer = 3;
   addScore(e.t.score * comboMult() * (wasPerched ? 2 : 1));
@@ -200,7 +204,7 @@ function sprayTick() {
 }
 function shakeCan() {
   if (S.shaking > 0 || S.spray >= CFG.sprayMax) return;
-  S.shaking = CFG.shakeTime; sfx.shake(); stopSprayFx();
+  S.shaking = CFG.shakeTime; sfx.shake(); stopSprayFx(); nativeHaptic('medium');
   handEl.classList.remove('agitando'); void handEl.offsetWidth; handEl.classList.add('agitando');
 }
 
@@ -233,6 +237,7 @@ function playerHit(dmg) {
   sfx.ouch();
   const d = $('dmg'); d.classList.add('on'); setTimeout(() => d.classList.remove('on'), 120);
   if (navigator.vibrate) navigator.vibrate(60);
+  nativeHaptic('heavy');
   floatText('¡AUCH!');
   if (S.hp <= 0) gameOver();
 }
@@ -789,6 +794,7 @@ function beginPlay() {
   if (S.mode === 'ar' && S.detectOn) { spotter.load().then(() => scheduleDetect()); }
 }
 function gameOver() {
+  nativeHaptic('heavy');
   S.state = 'over'; S.firing = false; S.shielding = false; document.body.classList.remove('shielding');
   sprayStop(); for (const e of enemies) e.buzz?.set(0.05, 0, 1);
   musicCtl.jingle('over'); setTimeout(() => { if (S.state !== 'playing') musicCtl.play('menu'); }, 3200);
@@ -934,6 +940,16 @@ $('vol-music').addEventListener('input', (e) => { unlockAudio(); setMusicVolume(
 $('vol-sfx').addEventListener('input', (e) => { unlockAudio(); setSfxVolume(e.target.value / 100); sfx.hit(); });
 paintSnd();
 
+
+$('btn-share')?.addEventListener('click', async () => {
+  const text = `¡Hice ${S.score.toLocaleString('es-CL')} puntos en Zancudos al Ataque! Llegué a la oleada ${S.wave}.`;
+  if (window.__zaNative?.shareText) {
+    await window.__zaNative.shareText('Zancudos al Ataque', text);
+  } else if (navigator.share) {
+    try { await navigator.share({ title: 'Zancudos al Ataque', text }); } catch { /* canceló */ }
+  }
+});
+
 function updateMenuBest() { $('m-best').textContent = S.best ? `Récord: ${S.best.toLocaleString('es-CL')}` : ''; }
 updateMenuBest();
 checkXR();
@@ -944,7 +960,7 @@ async function requestWakeLock() { try { wakeLock = await navigator.wakeLock?.re
 document.addEventListener('visibilitychange', () => { if (!document.hidden && S.state !== 'menu') requestWakeLock(); });
 
 // PWA: service worker (red primero, caché offline)
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+if ('serviceWorker' in navigator && !window.__zaNative) navigator.serviceWorker.register('./sw.js').catch(() => {});
 if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) $('install').style.display = 'none';
 
 

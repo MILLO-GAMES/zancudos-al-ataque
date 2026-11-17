@@ -1,0 +1,32 @@
+{
+  "name": "zancudos-al-ataque",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Zancudos al Ataque — juego AR de pieza. MILLO GAMES.",
+  "author": "MILLO GAMES",
+  "license": "SEE LICENSE IN vendor/mediapipe y assets/fonts/OFL.txt",
+  "scripts": {
+    "build": "node scripts/build-www.mjs",
+    "assets:generate": "capacitor-assets generate --ios --assetPath resources --iconBackgroundColor '#ff9628' --iconBackgroundColorDark '#14101f' --splashBackgroundColor '#ff9628' --splashBackgroundColorDark '#14101f'",
+    "cap:sync": "npm run build && npx cap sync ios",
+    "cap:open": "npx cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.6.2",
+    "@capacitor/haptics": "8.0.2",
+    "@capacitor/ios": "8.6.2",
+    "@capacitor/share": "8.0.3",
+    "@capacitor/splash-screen": "8.0.2",
+    "@capacitor/status-bar": "8.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "4.0.0",
+    "@capacitor/cli": "8.6.2",
+    "esbuild": "^0.25.11",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "type": "module"
+}

@@ -244,3 +244,15 @@ h1.comic i.excl { color: #fff; }
 #panel header b { font-family: 'Bangers', ui-rounded, sans-serif; font-weight: 400; letter-spacing: .06em; font-size: 1.35em; color: #ffe14a; text-shadow: 2px 2px 0 #14101f; }
 #hud-top .snd { margin-left: calc(var(--u) * -.5); }
 #btn-fs svg, #btn-fs-menu svg { vertical-align: -.15em; }
+
+
+/* App nativa Capacitor: ocultar chrome de la PWA / web */
+html.is-capacitor #install,
+html.is-capacitor #btn-fs,
+html.is-capacitor #btn-fs-menu,
+html.is-capacitor #m-xr {
+  display: none !important;
+}
+html.is-capacitor #link-privacidad {
+  color: #ffe08a;
+}

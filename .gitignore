@@ -1,3 +1,18 @@
+.DS_Store
+Thumbs.db
+*.log
+tmp/
 certs/
 run/
 *.pid
+
+# Capacitor / iOS (trabajo local en ios/app-store; no va a main)
+/www/
+/node_modules/
+/ios/App/Pods/
+/ios/App/App/public/
+/ios/DerivedData/
+/ios/App/CapApp-SPM/.build/
+*.xcuserstate
+xcuserdata/
+/resources/android/

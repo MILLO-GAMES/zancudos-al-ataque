@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="es-CL">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#14101f" />
+  <meta name="robots" content="index,follow" />
+  <title>Política de privacidad — Zancudos al Ataque</title>
+  <meta name="description" content="Cómo trata Zancudos al Ataque, de MILLO GAMES SpA, la cámara y los datos en tu dispositivo. Sin cuentas, sin analíticas y sin servidores." />
+  <style>
+    :root {
+      --bg: #14101f;
+      --bg2: #24182c;
+      --card: #fff8ee;
+      --ink: #1a1220;
+      --accent: #ff9628;
+      --accent2: #ffc857;
+      --warm: #ffd9a0;
+      --muted: #8a6b4a;
+      --font: system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      --safe-t: env(safe-area-inset-top, 0px);
+      --safe-b: env(safe-area-inset-bottom, 0px);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      font-family: var(--font);
+      color: var(--ink);
+      background:
+        radial-gradient(900px 500px at 50% -10%, #ff9628 0%, transparent 55%),
+        linear-gradient(180deg, var(--bg2), var(--bg));
+      min-height: 100dvh;
+      line-height: 1.55;
+    }
+    header {
+      padding: calc(1rem + var(--safe-t)) 1.2rem .9rem;
+      color: #fff8ee;
+      display: flex;
+      align-items: center;
+      gap: .65rem;
+    }
+    .mark { width: 2.2rem; height: 2.2rem; flex-shrink: 0; border-radius: 8px; }
+    header .brand strong { display: block; font-size: 1.05rem; }
+    header .brand small { display: block; color: var(--warm); letter-spacing: .06em; font-size: .72rem; }
+    main {
+      width: min(720px, calc(100% - 1.5rem));
+      margin: 0 auto calc(2rem + var(--safe-b));
+    }
+    article {
+      background: var(--card);
+      border-radius: 18px;
+      padding: 1.35rem 1.25rem 1.6rem;
+      box-shadow: 0 12px 40px rgba(0,0,0,.35);
+    }
+    h1 { font-size: 1.7rem; margin: 0 0 .25rem; }
+    .meta { color: var(--muted); font-size: .9rem; margin: 0 0 1.1rem; }
+    h2 { font-size: 1.08rem; color: #8a3d00; margin: 1.35rem 0 .4rem; }
+    p, li { margin: 0 0 .7rem; }
+    ul { padding-left: 1.2rem; }
+    a { color: #8a4e1e; }
+    .en { margin-top: 1.6rem; padding-top: 1.2rem; border-top: 1px dashed #d2b896; }
+    footer {
+      text-align: center;
+      color: rgba(255,255,255,.55);
+      font-size: .8rem;
+      padding: 0 1rem calc(1.2rem + var(--safe-b));
+    }
+    footer a { color: var(--accent2); }
+  </style>
+</head>
+<body>
+  <header>
+    <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+      <rect width="64" height="64" rx="12" fill="#ff9628"/>
+      <circle cx="28" cy="28" r="10" fill="#3a1020"/>
+      <circle cx="24" cy="25" r="2" fill="#ff3b30"/>
+      <circle cx="32" cy="25" r="2" fill="#ff3b30"/>
+      <path d="M18 22 C8 8 20 6 30 18" fill="none" stroke="#fff" stroke-width="2"/>
+      <path d="M38 22 C48 8 44 6 34 18" fill="none" stroke="#fff" stroke-width="2"/>
+    </svg>
+    <div class="brand">
+      <strong>Zancudos al Ataque</strong>
+      <small>MILLO GAMES</small>
+    </div>
+  </header>
+  <main>
+    <article>
+      <h1>Política de privacidad</h1>
+      <p class="meta">Vigente desde el 16 de noviembre de 2026. Aplica a la app Zancudos al Ataque para iOS y a esta página.</p>
+
+      <h2>Responsable</h2>
+      <p>El responsable de esta app es <strong>MILLO GAMES SpA</strong> (Chile), que publica Zancudos al Ataque. Contacto: <a href="mailto:millo@millo.cl">millo@millo.cl</a>.</p>
+
+      <h2>Qué hace la app</h2>
+      <p>Zancudos al Ataque es un juego de realidad aumentada: usas la cámara trasera y los sensores de movimiento del iPhone para apuntar y rociar insecticida a zancudos de estilo cómic que aparecen en tu pieza. También puedes jugar en un modo sin cámara (holodeck), desbloquear un álbum de láminas y leer datos reales de prevención sobre zancudos.</p>
+
+      <h2>Cámara</h2>
+      <p>Si eliges «Jugar en AR», la app pide permiso para usar la <strong>cámara trasera</strong>. La imagen se muestra como fondo del juego y, si está activada la opción «Posarse en objetos», se analiza <strong>dentro del teléfono</strong> con un modelo de detección de objetos (MediaPipe EfficientDet-Lite0) para reconocer muebles como la tele, el sillón o la mesa.</p>
+      <p><strong>Los cuadros de la cámara no se graban, no se guardan y no se envían</strong> a MILLO GAMES ni a ningún servidor. El modelo de detección va empaquetado en la app y corre en el dispositivo. Si niegas el permiso de cámara, puedes jugar igual en el modo holodeck.</p>
+
+      <h2>Movimiento y orientación</h2>
+      <p>La app usa el giroscopio y el acelerómetro para apuntar al girar el teléfono y para recargar el spray al agitarlo. Esa información se procesa solo en el aparato, en el momento, y no se almacena ni se transmite.</p>
+
+      <h2>Qué datos se guardan y dónde</h2>
+      <p>La app <strong>no crea cuentas</strong>, <strong>no usa servidores para tus datos</strong>, <strong>no incluye analíticas</strong>, <strong>no hace seguimiento publicitario</strong> y <strong>no muestra anuncios</strong>.</p>
+      <p>En el almacenamiento local del dispositivo se guardan solo:</p>
+      <ul>
+        <li>tu récord de puntaje;</li>
+        <li>las láminas del álbum que ya desbloqueaste;</li>
+        <li>preferencias de sonido, volumen, layout, modo copiloto y si el detector de objetos está encendido.</li>
+      </ul>
+      <p>Nada de eso sale del teléfono. El juego, los sprites, la música (generada en el aparato) y el modelo de detección van empaquetados en la app y funcionan sin internet.</p>
+
+      <h2>Compartir</h2>
+      <p>Si eliges «Compartir resultado», se abre la <strong>hoja nativa</strong> de iOS con un texto de tu puntaje. Tú decides con qué app o persona lo compartes. Zancudos al Ataque no envía ese contenido a nuestros servidores.</p>
+
+      <h2>Cómo borrar tus datos</h2>
+      <p>Al eliminar la app se borran el récord, el álbum y las preferencias de este dispositivo. No conservamos una copia en un servidor.</p>
+
+      <h2>Niños</h2>
+      <p>La app no recopila datos personales de nadie, incluidos menores. No pedimos nombre, correo ni edad para jugar.</p>
+
+      <h2>Cambios</h2>
+      <p>Si esta política cambia, actualizaremos esta página y la fecha de vigencia. El contacto para dudas es <a href="mailto:millo@millo.cl">millo@millo.cl</a>.</p>
+
+      <section class="en" lang="en">
+        <h2>Privacy policy (English summary)</h2>
+        <p>Zancudos al Ataque is published by <strong>MILLO GAMES SpA</strong> (Chile). Contact: <a href="mailto:millo@millo.cl">millo@millo.cl</a>. This policy is effective 16 November 2026.</p>
+        <p>If you play in AR mode, the app uses the rear camera as the game background and, optionally, runs on-device object detection (MediaPipe) to spot furniture. Camera frames are not recorded, stored or sent. Motion sensors are used only to aim and to reload the spray can, and are not stored or transmitted. The app has no accounts, no analytics, no advertising and no tracking. Your high score, sticker album and preferences stay on the device. Sharing a score uses iOS’s native share sheet; we do not receive that content. You can also play without the camera (holodeck mode). Uninstalling the app deletes this local data.</p>
+      </section>
+    </article>
+  </main>
+  <footer>
+    © 2026 MILLO GAMES SpA · Zancudos al Ataque · <a href="mailto:millo@millo.cl">millo@millo.cl</a>
+  </footer>
+</body>
+</html>
