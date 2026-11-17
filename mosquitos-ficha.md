@@ -13,15 +13,15 @@ Precio: gratis (sin compras dentro de la app en esta versión).
 
 Zancudos al Ataque
 
-(20 caracteres de 30. Comprobar en App Store Connect que no esté tomado.)
+(18 caracteres de 30. Comprobar en App Store Connect que no esté tomado.)
 
 ## Subtítulo
 
 AR: caza zancudos en tu pieza
 
-(30 caracteres de 30.)
+(29 caracteres de 30.)
 
-Alternativa un poco más corta, si se prefiere no ir al límite: «Caza zancudos en tu pieza» (26).
+Alternativa un poco más corta, si se prefiere no ir al límite: «Caza zancudos en tu pieza» (25).
 
 ## Descripción
 
@@ -41,7 +41,7 @@ Una app de MILLO GAMES.
 
 zancudos,mosquitos,spray,realidad aumentada,ar,camara,caza,insectos,pieza,oleadas
 
-(94 caracteres de 100. Sin tildes, como recomienda Apple. No se repite el nombre «Zancudos al Ataque», que ya es buscable. Se incluye «mosquitos» porque en Chile se usa como sinónimo y es como Christian nombra el juego.)
+(81 caracteres de 100. Sin tildes, como recomienda Apple. No se repite el nombre «Zancudos al Ataque», que ya es buscable. Se incluye «mosquitos» porque en Chile se usa como sinónimo y es como Christian nombra el juego.)
 
 ## Categoría sugerida
 
