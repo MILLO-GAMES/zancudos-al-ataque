@@ -5,7 +5,7 @@ Borrador en español (Chile), basado en el contenido real del juego en el commit
 Christian se refirió a este juego como «Mosquitos al Ataque». El nombre oficial, el que está en el juego, el repo y este borrador, es **Zancudos al Ataque**. No usar «Mosquitos al Ataque» como nombre de tienda: no coincide con lo que ve el jugador y puede chocar con la guía de precisión de metadatos (2.3).
 
 Bundle ID propuesto: `cl.millogames.zancudos`  
-Versión de marketing en Xcode: 1.0 (build 1).  
+Versión de marketing en Xcode: 1.0 (build 2).  
 Idioma principal: español (Chile).  
 Precio: gratis (sin compras dentro de la app en esta versión).
 
@@ -35,7 +35,7 @@ Hay un álbum de seis láminas estilo cómic que se desbloquean jugando, un modo
 
 El detector de objetos corre dentro del teléfono: la imagen de la cámara no se graba ni se envía. El récord y el álbum quedan guardados solo en el aparato. El juego funciona sin internet.
 
-Una app de MILLO GAMES.
+Una app de Christian Jaramillo.
 
 ## Palabras clave
 
@@ -107,8 +107,8 @@ En el repo hay material de promo (`promo/zancudos.gif`, `promo/zancudos.mp4`, `p
 
 - Ícono 1024×1024: ya está en `ios/App/App/Assets.xcassets/AppIcon.appiconset/` (arte del repo, zancudo cómic y spray sobre fondo naranjo).
 - Política de privacidad: el HTML está listo en `/workspace/ios-apps/mosquitos-privacidad/privacidad.html` y va empaquetado en la app (`privacidad.html`, enlace en el menú). **Todavía no tiene URL pública.** Propuesta, pendiente de publicar: https://zancudos.millogames.online/privacidad.html
-  Responsable: MILLO GAMES SpA. Contacto: millo@millo.cl. Fecha: 16-11-2026.
-- Copyright: app © 2026 MILLO GAMES SpA. Three.js y MediaPipe: Apache-2.0. Fuente Bangers: SIL Open Font License (incluida en `assets/fonts/OFL.txt`).
+  Responsable: Christian Jaramillo. Contacto: millo@millo.cl. Fecha: 16-11-2026.
+- Copyright: app © 2026 Christian Jaramillo. Three.js: MIT. MediaPipe: Apache-2.0. Fuente Bangers: SIL Open Font License (incluida en `assets/fonts/OFL.txt`).
 
 ## Notas para la revisión
 

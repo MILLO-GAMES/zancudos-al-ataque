@@ -5,10 +5,11 @@ const config: CapacitorConfig = {
   appName: 'Zancudos al Ataque',
   webDir: 'www',
   // Sin server.url: el juego se sirve empaquetado (cámara, modelo y wasm van en el bundle).
-  // iosScheme https: origen seguro, necesario para getUserMedia y DeviceOrientation en WKWebView.
-  server: {
-    iosScheme: 'https',
-    hostname: 'localhost',
+  // No se usa server.iosScheme: Capacitor lo descarta en WKWebView y el origen real es capacitor://localhost,
+  // que ya es un contexto seguro para getUserMedia y DeviceOrientation. Hay que comprobarlo en un iPhone real.
+  // accessOrigins vacío: evita que cap sync regenere <access origin="*"/> en config.xml.
+  cordova: {
+    accessOrigins: [],
   },
   ios: {
     contentInset: 'never',

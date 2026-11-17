@@ -20,7 +20,7 @@ Antes se llamaba Asedio Neón (el repo `MILLO-GAMES/asedio-neon` solo redirige).
 
 Juego de realidad aumentada de MILLO GAMES: te quedas en tu sitio, giras el iPhone, apuntas con la mira y rocias insecticida a zancudos estilo cómic que zumban en tu pieza. La cámara trasera es el fondo. Si el detector de objetos reconoce un mueble, algunos zancudos se posan y valen el doble. Hay oleadas, criaderos que hay que vaciar, un álbum de láminas, modo copiloto (pensado para un iPhone Duo abierto) y un modo sin cámara (holodeck).
 
-En Xcode la versión de marketing quedó en **1.0** (build 1).
+En Xcode la versión de marketing quedó en **1.0** (build 2).
 
 ## Versiones usadas en este empaquetado
 
@@ -42,7 +42,10 @@ En Xcode la versión de marketing quedó en **1.0** (build 1).
 - En nativo se ocultan: instrucciones para instalar la PWA desde Safari, botones de pantalla completa y el texto de WebXR.
 - No se registra el service worker en la app nativa.
 - El detector de objetos (MediaPipe) en la build iOS usa **solo** los archivos locales (`vendor/mediapipe/`, `models/`). Se quitaron los respaldos a jsDelivr y a `storage.googleapis.com`.
-- `server.iosScheme = 'https'` para que `getUserMedia` y la orientación del dispositivo corran en un origen seguro dentro de WKWebView.
+- El origen en WKWebView es `capacitor://localhost` (no se usa `server.iosScheme`: Capacitor lo descarta). Es un contexto seguro para `getUserMedia` y la orientación; hay que comprobarlo en un iPhone real.
+- `cordova.accessOrigins: []` para que `cap sync` no regenere `<access origin="*"/>` en `config.xml`.
+- `PrivacyInfo.xcprivacy` propio: sin recolección de datos y sin tracking.
+- Telemetría de MediaPipe (POST a `odml.pa.googleapis.com/v1/log`) anulada en `vendor/mediapipe/vision_bundle.mjs` (Apache-2.0) y bloqueada con CSP `connect-src 'self' blob: data:` en `index.html`.
 - Política de privacidad empaquetada (`privacidad.html`), accesible desde el menú. **No se publicó en ningún servidor.**
 - El proyecto Xcode quedó **solo para iPhone** (Targeted Device Family = 1). El juego está pensado para girar un teléfono; incluir iPad exigiría capturas de iPad 13".
 
@@ -57,7 +60,7 @@ La app está pensada para funcionar sin internet. Revisión hecha sobre el códi
 | Modelo EfficientDet-Lite0 (int8, ~4,6 MB) | Sí, empaquetado (`models/`) |
 | Música y efectos | Sí, sintetizados con WebAudio en el aparato |
 | `localStorage` (récord, álbum, preferencias) | Sí, en el dispositivo |
-| Cámara y sensores | Hardware local; no se envía nada |
+| Cámara y sensores | Hardware local; no se envía nada (telemetría de MediaPipe anulada) |
 | Respaldo CDN de MediaPipe (jsDelivr / Google Storage) | **Quitado en la build iOS** |
 | Open Graph (`millo-games.github.io`) | Solo metadato en el HTML; no se llama en runtime |
 | Service worker | No se registra en nativo |
@@ -104,12 +107,13 @@ Si se cambian HTML/JS/CSS/assets, repetir `npm run cap:sync` antes de volver a c
 ## Rutas útiles
 
 - Proyecto: `/workspace/ios-apps/mosquitos-al-ataque` (en el box); la misma estructura dentro del zip
-- Config Capacitor: `capacitor.config.ts` (`webDir: www`, sin `server.url`, `server.iosScheme: 'https'`)
+- Config Capacitor: `capacitor.config.ts` (`webDir: www`, sin `server.url` ni `server.iosScheme`, `cordova.accessOrigins: []`)
 - Puente nativo: `js/native-ios.js` (se empaqueta a `www/js/native-ios.js`)
 - Build web: `scripts/build-www.mjs`
 - Ícono y splash fuente: `resources/icon.png`, `resources/splash.png`
 - Catálogo Xcode: `ios/App/App/Assets.xcassets/`
 - Info.plist: `ios/App/App/Info.plist` (cámara, movimiento, `ITSAppUsesNonExemptEncryption = false`)
+- PrivacyInfo: `ios/App/App/PrivacyInfo.xcprivacy`
 - Ficha App Store: `/workspace/ios-apps/mosquitos-ficha.md`
 - Política de privacidad (fuente): `/workspace/ios-apps/mosquitos-privacidad/privacidad.html` (copia también en el repo: `privacidad.html`)
 - URL pública propuesta (aún no publicada): `https://zancudos.millogames.online/privacidad.html`
@@ -117,9 +121,9 @@ Si se cambian HTML/JS/CSS/assets, repetir `npm run cap:sync` antes de volver a c
 ## Riesgos de revisión (Apple)
 
 - **Guideline 4.2 (Minimum functionality):** es una WebView de un juego HTML5/Three.js. Se añadieron ícono, splash, status bar, hápticos, share nativo, permisos nativos de cámara/movimiento y modo offline. El juego en sí es sustancial (AR, oleadas, detector de objetos, álbum, copiloto). Aun así existe riesgo si el revisor lo percibe como «solo un sitio envuelto». En la ficha no conviene hablar de PWA, Safari ni «versión web».
-- **Cámara en WKWebView:** `getUserMedia` debería funcionar con `NSCameraUsageDescription` y `iosScheme: https`. Hay que comprobarlo en un iPhone real antes de enviar a revisión. Si fallara, el modo holodeck sigue disponible, pero la propuesta de valor de la ficha es el AR en la pieza.
+- **Cámara en WKWebView:** `getUserMedia` debería funcionar con `NSCameraUsageDescription` en el origen `capacitor://localhost`. Hay que comprobarlo en un iPhone real antes de enviar a revisión. Si fallara, el modo holodeck sigue disponible, pero la propuesta de valor de la ficha es el AR en la pieza.
 - **Guideline 5.1.1 (privacidad):** al usar cámara hace falta una política de privacidad **con URL pública** en App Store Connect. El HTML está listo, pero **no se ha publicado en ningún servidor**. Hay que subirla (por ejemplo a `https://zancudos.millogames.online/privacidad.html`) antes del envío, con autorización y revisión del Auditor.
-- **MediaPipe / visión:** en esta build no hay llamadas de red. Declarar en la ficha de privacidad que la cámara se procesa solo en el dispositivo y que no se recolectan datos.
+- **MediaPipe / visión:** el logger de Tasks Vision 1.2.2 quedó en no-op y hay CSP `connect-src` que impide el POST a Google. Declarar en la ficha de privacidad «Data Not Collected»: la cámara se procesa solo en el dispositivo y no se recolectan datos.
 - No se incluye la Edición Singular (caras reales). Publicarla sería un riesgo grave de privacidad y de consentimiento de imagen.
 - Monetización futura (compras, anuncios) no está en esta versión; habría que declararla en una actualización.
 - El nombre «Mosquitos al Ataque» no aparece en el juego. Usar ese nombre en la ficha chocaría con la guía de precisión de metadatos (2.3).

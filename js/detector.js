@@ -1,8 +1,8 @@
 // ==========================================================
 // Detector de objetos de la pieza (MediaPipe Object Detector · EfficientDet-Lite0 · COCO).
 // Corre sobre el video de la cámara a pocos cuadros por segundo para no botar el rendimiento.
-// Primero intenta los archivos copiados en el repo (funciona offline una vez cacheado) y,
-// si fallan, el CDN oficial. Si nada carga, el juego sigue igual pero sin posarse en objetos.
+// En esta build iOS solo se usan los archivos empaquetados en vendor/mediapipe y models
+// (scripts/build-www.mjs quita cualquier respaldo remoto). Si no cargan, el juego sigue sin posarse en objetos.
 // ==========================================================
 const VER = '1.2.2';
 const SOURCES = [
