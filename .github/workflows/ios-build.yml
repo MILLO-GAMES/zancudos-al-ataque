@@ -1,0 +1,159 @@
+# Compila, firma y (opcionalmente) sube a TestFlight «Zancudos al Ataque» (cl.millogames.zancudos).
+# Solo disparo manual. Runner macos-26 ESTÁNDAR (nunca -large / -xlarge).
+# No envía nada a revisión de App Store ni a beta externa: solo sube el build.
+#
+# Secretos cifrados del repositorio (nunca en el árbol del repo):
+#   APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_API_KEY_P8 (texto PEM)
+#   IOS_DIST_CERT_P12_BASE64, IOS_DIST_CERT_P12_PASSWORD  (certificado Apple Distribution)
+#   IOS_APPSTORE_PROFILE_BASE64                             (perfil App Store "Zancudos al Ataque App Store CI")
+
+name: iOS TestFlight (Zancudos al Ataque)
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_to_testflight:
+        description: "Subir el IPA a TestFlight (false = solo archivar, exportar y calcular SHA-256)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-build-zancudos
+  cancel-in-progress: false
+
+env:
+  APP_BUNDLE_ID: cl.millogames.zancudos
+  DEVELOPER_TEAM: MLQ9YVH9U2
+  XCODE_SCHEME: App
+  XCODE_PROJECT: ios/App/App.xcodeproj
+  PROFILE_NAME: "Zancudos al Ataque App Store CI"
+
+jobs:
+  archive-and-upload:
+    name: Archive, sign and optional TestFlight upload
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26.x
+        run: |
+          ls -d /Applications/Xcode*.app || true
+          if [ -d /Applications/Xcode_26.6.app ]; then sudo xcode-select -s /Applications/Xcode_26.6.app; fi
+          xcodebuild -version
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install JS deps and sync Capacitor iOS (SPM)
+        run: |
+          npm ci
+          npm run cap:sync
+          ls ios/App/App/public
+
+      - name: Install signing material (temporary keychain)
+        env:
+          P12_B64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.IOS_DIST_CERT_P12_PASSWORD }}
+          PROFILE_B64: ${{ secrets.IOS_APPSTORE_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$P12_B64" ] || [ -z "$P12_PASSWORD" ] || [ -z "$PROFILE_B64" ]; then
+            echo "Faltan secretos de firma"; exit 1
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KC_PASS="$(openssl rand -hex 24)"
+          echo "::add-mask::$KC_PASS"
+          printf '%s' "$P12_B64" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          printf '%s' "$PROFILE_B64" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"
+          security create-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/dist.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KC_PASS" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$KEYCHAIN" | sed -E 's/[0-9A-F]{40}/<sha1>/'
+          UUID=$(security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" | plutil -extract UUID raw -o - -)
+          for d in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$d"; cp "$RUNNER_TEMP/profile.mobileprovision" "$d/$UUID.mobileprovision"
+          done
+          rm -f "$RUNNER_TEMP/dist.p12"
+          echo "KEYCHAIN_PATH=$KEYCHAIN" >> "$GITHUB_ENV"
+
+      - name: Write ExportOptions.plist
+        run: |
+          mkdir -p build
+          /usr/libexec/PlistBuddy -c "Add :method string app-store-connect" \
+            -c "Add :teamID string $DEVELOPER_TEAM" \
+            -c "Add :signingStyle string manual" \
+            -c "Add :signingCertificate string Apple Distribution" \
+            -c "Add :destination string export" \
+            -c "Add :stripSwiftSymbols bool true" \
+            -c "Add :uploadSymbols bool true" \
+            -c "Add :manageAppVersionAndBuildNumber bool false" \
+            -c "Add :provisioningProfiles dict" \
+            -c "Add :provisioningProfiles:$APP_BUNDLE_ID string $PROFILE_NAME" \
+            build/ExportOptions.plist
+          plutil -p build/ExportOptions.plist
+
+      - name: Archive (manual signing, Apple Distribution)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$PWD/build/Zancudos.xcarchive" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH" \
+            archive | tee build/archive.log | grep -E "error:|warning: .*sign|\*\* ARCHIVE" || true
+          test -d build/Zancudos.xcarchive/Products/Applications/App.app || { tail -n 200 build/archive.log; exit 1; }
+
+      - name: Export IPA
+        run: |
+          set -o pipefail
+          xcodebuild -exportArchive \
+            -archivePath "$PWD/build/Zancudos.xcarchive" \
+            -exportPath "$PWD/build/export" \
+            -exportOptionsPlist "$PWD/build/ExportOptions.plist"
+          IPA=$(ls build/export/*.ipa)
+          shasum -a 256 "$IPA" | tee build/ipa.sha256
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" -c "Print :CFBundleVersion" build/Zancudos.xcarchive/Products/Applications/App.app/Info.plist
+          echo "IPA_PATH=$IPA" >> "$GITHUB_ENV"
+
+      - name: Keep IPA as private artifact (3 days)
+        uses: actions/upload-artifact@v4
+        with:
+          name: zancudos-ipa
+          path: |
+            build/export/*.ipa
+            build/ipa.sha256
+          retention-days: 3
+
+      - name: Upload IPA to TestFlight (altool, API key)
+        if: ${{ inputs.upload_to_testflight }}
+        env:
+          ASC_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          KEY_DIR="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$KEY_DIR"
+          ( umask 077; printf '%s\n' "$ASC_KEY_P8" > "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8" )
+          xcrun altool --upload-app --type ios --file "$IPA_PATH" \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: Cleanup signing material
+        if: always()
+        run: |
+          rm -rf "$HOME/.appstoreconnect/private_keys" "$RUNNER_TEMP/profile.mobileprovision" "$RUNNER_TEMP/dist.p12"
+          if [ -n "${KEYCHAIN_PATH:-}" ]; then security delete-keychain "$KEYCHAIN_PATH" || true; fi
